@@ -104,6 +104,20 @@ The ordinary `request` call returns Any, as is usual in Akka. Sometimes, it is c
 ```
 This makes the whole thing more strongly-typed upfront -- in the above code, the compiler knows that `notes` is a `CurrentNotifications` message. If anything other than `CurrentNotifications` is received, it will throw a `ClassCastException`.
 
+### RequesterImplicits
+
+The above is all fine so long as you are sending your requests from directly inside the Requester. But what if your structure is more complex -- say, you have your handlers broken up into a number of classes instantiated by and running under the Requester? (For example, in Querki, we have a single primary UserSpaceSession that mediates all normal client/server requests. Each request then causes an appropriate handler object to be created, which actually deals with the functions in question.)
+
+If you want one of these outside classes to be able to use `request`, then you should have it inherit from the RequesterImplicits trait, and override that trait's `requester` member to point to the controlling Requester Actor.
+
+RequesterImplicits actually defines `request`, `requestFor` and `requestFuture`; it delegates the actual processing to the associated Requester. (Requester itself implements RequesterImplicits, so you can just ignore this for the ordinary case.)
+
+### Caveats
+
+Requester is powerful, and brings you back into the land of Akka sanity, but it isn't a panacea. In particular, remember that your `request` response handler will *always* be run asynchronously, in a later run through receive. The state of your Actor may well have changed since you sent your message -- be sure to keep that in mind when you are writing your response handler.
+
+Also, for the same reasons, using Requester with frequent `become` operations or with FSM is pretty fraught. While it isn't necessarily incompatible, I recommend using extreme caution if you are trying to combine these concepts. (This is no different from usual, though: FSM always requires care and thought about what you want to have happen when an obsolete request comes back.)
+
 ### License
 
 Copyright (c) 2015 Querki Inc. (justin at querki dot net)
