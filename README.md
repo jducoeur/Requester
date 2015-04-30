@@ -89,24 +89,24 @@ def doChangeProps(thing:Thing, props:PropMap):Future[PropertyChangeResponse] = {
   }
 }
 ```
-`requestFuture` is mostly just a bit of sugar, but it is very convenient for circumstances like this. `request` accepts an implicit Promise[_], which is created by `requestFuture`. (Note that the `promise` parameter must be marked implicit for things to work right.) If it finds one, then all thrown exceptions will be routed into the Promise, so that the resulting Future will return Failed(exception), as you would expect.
+`requestFuture` is mostly just an optional bit of sugar, but it is very convenient for circumstances like this. `request` accepts an implicit Promise[_], which is created by `requestFuture`. (Note that the `promise` parameter must be marked implicit for things to work right.) If it finds that implicit Promise, then any thrown exceptions will be routed into it, so that the resulting Future will return Failed(exception), as you would expect.
 
 ### `requestFor`
 
 The ordinary `request` call returns Any, as is usual in Akka. Sometimes, it is clearer to be able to state upfront what type you expect to receive, especially if there is only one "right" answer. `requestFor` is a variant of `request` that allows you to state this:
 ```
-  notePersister.requestFor[CurrentNotifications](Load) foreach { notes =>
-	  currentNotes = notes.notes.sortBy(_.id).reverse
+notePersister.requestFor[CurrentNotifications](Load) foreach { notes =>
+  currentNotes = notes.notes.sortBy(_.id).reverse
 	    
-	  // Okay, we're ready to roll:
-	  self ! InitComplete
-	}
+  // Okay, we're ready to roll:
+  self ! InitComplete
+}
 ```
 This makes the whole thing more strongly-typed upfront -- in the above code, the compiler knows that `notes` is a `CurrentNotifications` message. If anything other than `CurrentNotifications` is received, it will throw a `ClassCastException`.
 
 ### RequesterImplicits
 
-The above is all fine so long as you are sending your requests from directly inside the Requester. But what if your structure is more complex -- say, you have your handlers broken up into a number of classes instantiated by and running under the Requester? (For example, in Querki, we have a single primary UserSpaceSession that mediates all normal client/server requests. Each request then causes an appropriate handler object to be created, which actually deals with the functions in question.)
+The above is all fine so long as you are sending your requests from directly inside the Requester. But what if your structure is more complex -- say, you have your handlers broken up into a number of classes instantiated by and running under the Requester? (For example, in Querki, we have a single primary UserSpaceSession Actor that mediates all normal client/server requests. Each request then causes an appropriate handler object to be created, running under that Actor's receive loop, which actually deals with the functions in question.)
 
 If you want one of these outside classes to be able to use `request`, then you should have it inherit from the RequesterImplicits trait, and override that trait's `requester` member to point to the controlling Requester Actor.
 
