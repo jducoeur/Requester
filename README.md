@@ -118,6 +118,8 @@ Requester is powerful, and brings you back into the land of Akka sanity, but it 
 
 Also, for the same reasons, using Requester with frequent `become` operations or with FSM is pretty fraught. While it isn't necessarily incompatible, I recommend using extreme caution if you are trying to combine these concepts. (This is no different from usual, though: FSM always requires care and thought about what you want to have happen when an obsolete request comes back.)
 
+There are no unit tests yet. This needs to be rectified.
+
 While Requester is being used heavily in production at Querki, nobody else has used it as of this writing. Please give a yell if you come across bugs, and pull requests are welcomed.
 
 ### License
