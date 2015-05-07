@@ -124,6 +124,10 @@ There are no unit tests yet. This needs to be rectified.
 
 While Requester is being used heavily in production at Querki, nobody else has used it as of this writing. Please give a yell if you come across bugs, and pull requests are welcomed.
 
+### To Do
+
+Requester clearly ought to pair well with [Typed Actors](http://doc.akka.io/docs/akka/2.3.9/scala/typed-actors.html), but some surgery will be needed. Basically, we need to extend Requester to have a straightforward way to interpret any Future-producing function (not just ask) as a RequestM, automatically sussing the type that is implicit in the Future, and looping it back as normal. In principle this isn't difficult, but we need to think about how to minimize the boilerplate.
+
 ### License
 
 Copyright (c) 2015 Querki Inc. (justin at querki dot net)
