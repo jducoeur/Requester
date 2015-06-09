@@ -22,7 +22,7 @@ and have it work just as you expect.
 
 To use Requester, add this to your libraryDependencies in sbt:
 ```
-"org.querki" %% "requester" % "1.0"
+"org.querki" %% "requester" % "1.1"
 ```
 
 ### Using Requester
@@ -103,6 +103,24 @@ notePersister.requestFor[CurrentNotifications](Load) foreach { notes =>
 }
 ```
 This makes the whole thing more strongly-typed upfront -- in the above code, the compiler knows that `notes` is a `CurrentNotifications` message. If anything other than `CurrentNotifications` is received, it will throw a `ClassCastException`.
+
+### loopback()
+
+Requester is primarily focused on the common case where you are trying to send a request to another Actor within receive. But what if you want to use a plain old Future instead? That is where the loopback() function comes in.
+
+loopback() takes one parameter, a Future, and treats it like a Request -- it wraps the Future inside of a RequestM, so that when the Future completes, it will execute the subsequent functions (foreach and map) looped back in the main loop of the Actor. As with an ordinary Request, sender is preserved across this operation.
+
+loopback() is implicit, so if the code already expects a RequestM (for instance, inside of a for comprehension that is led off by a request()), you can just use a Future and it will auto-convert to RequestM. For example:
+```
+for {
+  ThingConversations(convs) <- spaceRouter.requestFor[ThingConversations](ConversationRequest(rc.requesterOrAnon, rc.state.get.id, GetConversations(rc.thing.get.id)))
+  identities <- IdentityAccess.getIdentities(getIds(convs).toSeq) 
+}
+   ...
+```
+Since this starts off with requestFor, the for comprehension is expecting RequestM; the Future returned from getIdentities automatically gets looped back, keeping everything running safely inside the Actor's receive loop.
+
+Note however, this can be a bit fragile -- it is easy to forget to put a request at the top of the comprehension, so everything winds up using dangerous raw Futures. So use this implicit with some care.
 
 ### RequesterImplicits
 
