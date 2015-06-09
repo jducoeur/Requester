@@ -133,7 +133,7 @@ trait RequesterImplicits {
    * 
    * @param reqFunc An arbitrarily-complex request clause, which eventually calls promise.success()
    *   when it gets the desired answer.
-   * @returns A Future of the specified type, which is hooked into the requests.
+   * @return A Future of the specified type, which is hooked into the requests.
    */
   def requestFuture[R](reqFunc:Promise[R] => Any)(implicit tag: ClassTag[R]):Future[R] = {
     val promise = Promise[R]
@@ -182,6 +182,22 @@ trait RequesterImplicits {
       requester.doRequest[T](target, msg, req)
       req
     }
+  }
+  
+  /**
+   * Convert a Future into a Request.
+   * 
+   * This takes the specified Future, and runs it in the Requester's main loop, to make it properly safe. As usual,
+   * sender will be preserved.
+   * 
+   * This is implicit, so if you are in a context that already expects a Request (such as a for comprehension with a Request
+   * at the top), it will quietly turn the Future into a Request. If Request isn't already expected, though, you'll have
+   * to specify loopback explicitly.
+   */
+  implicit def loopback[T](f:Future[T])(implicit promise:Promise[_] = Requester.emptyPromise, tag:ClassTag[T]):RequestM[T] = {
+    val req = new RequestM[T](promise)
+    requester.doRequestGuts[T](f, req)
+    req
   }
 }
 
@@ -258,8 +274,11 @@ trait Requester extends Actor with RequesterImplicits {
    * response within the timeout window.)
    */
   def doRequest[T](otherActor:ActorRef, msg:Any, handler:RequestM[T])(implicit tag: ClassTag[T]) = {
+    doRequestGuts(otherActor ask msg, handler)
+  }
+  
+  def doRequestGuts[T](f:Future[Any], handler:RequestM[T])(implicit tag: ClassTag[T]) = {
     val originalSender = sender
-    val f = otherActor ask msg
     import context.dispatcher
     val fTyped = f.mapTo[T]
     fTyped.onComplete {
@@ -276,7 +295,7 @@ trait Requester extends Actor with RequesterImplicits {
       case Failure(thrown) => {
         self.tell(RequestedResponse(Failure(thrown), handler), originalSender)
       }
-    }
+    }    
   }
   
   def handleRequestResponse:Actor.Receive = {
