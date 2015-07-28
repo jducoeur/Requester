@@ -35,5 +35,5 @@ abstract class QTestActor extends Actor with Requester {
   
   def doReceive:Receive
   
-  def receive = handleRequestResponse orElse doReceive
+  def receive = doReceive
 }

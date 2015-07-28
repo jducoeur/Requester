@@ -30,9 +30,10 @@ object ComprehensionTests {
     def doReceive = {
       case Start => {
         for {
-          Response(hello) <- answers.request(Hello)
-          Response(there) <- answers.request(There)
-          Response(world) <- answers.request(World)
+          // Note that this tests ask-style syntax:
+          Response(hello) <- answers ? Hello
+          Response(there) <- answers ? There
+          Response(world) <- answers ? World
         }
           sender ! hello + there + world
       }

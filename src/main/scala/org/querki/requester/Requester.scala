@@ -194,6 +194,17 @@ trait RequesterImplicits {
       requester.doRequest[T](target, msg, req)
       req
     }
+    
+    /**
+     * ask-style syntax for ordinary requests.
+     * 
+     * This *intentionally* conflicts with akka.pattern.ask, on the grounds that if you're in an askable situation,
+     * it is generally a bug to be using raw asks. So if you wind up with ambiguity, that's a warning sign.
+     * 
+     * (I might be willing to break this out, to make it possible to work around it, but somebody's going to have
+     * to convince me it's a good idea to do so. If you really want to use ask, then spell it out explicitly.)
+     */
+    def ?(msg:Any):RequestM[Any] = request(msg)
   }
   
   /**
@@ -260,10 +271,9 @@ trait RequesterImplicits {
  * Note that the original sender is preserved, so the callback can use it without problems. (This is the
  * most common error made when using ask, and was one of the motivations for creating Requester.) 
  * 
- * Note that, to make this work, the Request trait mixes in its own version of unhandled(). I *think* this
- * should Just Work, but it's probably the part where I'm on least-comfortable ground, so watch for edge
- * cases there. I have not yet tested how this interacts with Actor-defined unhandled(), and I'm mildly
- * concerned about possible loops.
+ * Note that, to make this work, the Request trait mixes in its own version of unhandled(). For this to
+ * work properly, therefore, it is very important that, if your own Actor overrides unhandled, it calls
+ * super.unhandled() for unknown messages!
  * 
  * IMPORTANT: Requester is *not* compatible with stateful versions of become() -- that is, if you are
  * using become() in a method where you are capturing the parameters in the closure of become(),
@@ -271,7 +281,7 @@ trait RequesterImplicits {
  * the closed-over parameter, and if the Actor has become() something else in the meantime, the handler
  * will use the *old* data, not the new.
  * 
- * More generally, Requester should be used with great caution if your Actor changes state frequently.
+ * More generally, Requester should be used with caution if your Actor changes state frequently.
  * While it *can* theoretically be used with FSM, it may not be wise to do so, since the state machine
  * may no longer be in a compatible state by the time the response is received. Requester is mainly intended
  * for Actors that spend most or all of their time in a single state; it generally works quite well for those.
@@ -290,6 +300,9 @@ trait Requester extends Actor with RequesterImplicits {
   
   /**
    * Override this to specify the timeout for requests
+   * 
+   * TODO: this is suspicious, since it does not follow Akka's preferred pattern for timeouts.
+   * We might change how this works.
    */
   implicit val requestTimeout = Timeout(10 seconds)
  
@@ -323,7 +336,10 @@ trait Requester extends Actor with RequesterImplicits {
     }    
   }
   
-  def handleRequestResponse:Actor.Receive = {
-    case resp:RequestedResponse[_] => resp.invoke
+  override def unhandled(message: Any): Unit = {
+    message match {
+      case resp:RequestedResponse[_] => resp.invoke
+      case other => super.unhandled(other)
+    }
   }
 }
