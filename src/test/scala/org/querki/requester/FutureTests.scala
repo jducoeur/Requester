@@ -1,7 +1,6 @@
 package org.querki.requester
 
 import scala.concurrent.{Await, Future}
-import scala.concurrent.duration._
 
 import akka.actor._
 
@@ -33,8 +32,6 @@ object FutureTests {
 
 class FutureTests extends RequesterTests with Futures with ScalaFutures {
   import FutureTests._
-  
-  implicit val dur = 1 second
   
   "Requester" should {
     "be able to work through a Future, new-style" in {

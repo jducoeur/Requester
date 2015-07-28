@@ -26,7 +26,7 @@ class RequestM[T](val promise:Promise[_]) {
    * Yes, this is mutable. That's arguably sad and evil, but remember that this is only intended
    * for use inside the pseudo-single-threaded world of an Actor.
    */
-  private var callbacks = List.empty[Function[T, _]]
+  private var callbacks = List.empty[Function[Try[T], _]]
   
   /**
    * Store the result, so that if someone hooks a callback into me after I'm resolved, I
@@ -35,7 +35,7 @@ class RequestM[T](val promise:Promise[_]) {
    * 
    * Yes, also mutable. Same argument. Deal.
    */
-  private var result:Option[T] = None
+  private var result:Option[Try[T]] = None
   
   private [requester] def propagateError(th:Throwable) = {
     if (promise eq Requester.emptyPromise) {
@@ -49,31 +49,32 @@ class RequestM[T](val promise:Promise[_]) {
   }
   
   private [requester] def resolve(v:Try[T]):Unit = {
-    v match {
-      case Success(v) => {
-        try {
-          result = Some(v)
-          callbacks foreach { cb => cb(v) }
-        } catch {
-          case th:Throwable => propagateError(th)
-        }
-      }
-      case Failure(ex) => propagateError(ex)
+    result = Some(v)
+    try {
+      callbacks foreach { cb => cb(v) }
+    } catch {
+      case th:Throwable => propagateError(th)
     }
   }
   
-  def handle(handler:T => _):Unit = {
+  def onComplete[U](handler: (Try[T]) => U):Unit = {
     result match {
       case Some(v) => handler(v)
       case None => callbacks :+= handler
     }
   }
   
-  def foreach(handler:T => Unit):Unit = {
-    val wrappedHandler:Function[T,Unit] = { v =>
-      handler(v)
+  def handleSucc(handler:T => _):Unit = {
+    onComplete { t:Try[T] =>
+      t match {
+        case Success(v) => handler(v)
+        case Failure(ex) =>
+      }
     }
-    handle(handler)
+  }
+  
+  def foreach(handler:T => Unit):Unit = {
+    handleSucc(handler)
   }
   
   def map[U](handler:T => U):RequestM[U] = {
@@ -81,12 +82,18 @@ class RequestM[T](val promise:Promise[_]) {
     // actually complete until sometime later. So when I *do* complete, pipe that result
     // into the given handler function, and use that to resolve the returned child.
     val child:RequestM[U] = new RequestM(promise)
-    val wrappedHandler:Function[T,U] = { v =>
-      val result = handler(v)
-      child.resolve(Success(result))
-      result
+    onComplete {
+      case Success(v) => {
+        try {
+          val result = handler(v)
+          child.resolve(Success(result))
+          result
+        } catch {
+          case th:Throwable => child.resolve(Failure(th))
+        }        
+      }
+      case Failure(ex) => child.resolve(Failure(ex))
     }
-    handle(wrappedHandler)
     child
   }
   
@@ -98,12 +105,18 @@ class RequestM[T](val promise:Promise[_]) {
     // and when the real one comes into existence, link its success to that of the one
     // we're returning here.
     val child:RequestM[U] = new RequestM(promise)
-    val wrappedHandler:Function[T,RequestM[U]] = { v =>
-      val subHandler = handler(v)
-      subHandler.handle { u:U => child.resolve(Success(u)) }
-      subHandler
+    onComplete {
+      case Success(v) => {
+        try {
+          val subHandler = handler(v)
+          subHandler.onComplete { u:Try[U] => child.resolve(u) }
+          subHandler
+        } catch {
+          case th:Throwable => { child.resolve(Failure(th)) }
+        }
+      }
+      case Failure(ex) => child.resolve(Failure(ex))
     }
-    handle(wrappedHandler)
     child
   }
   
@@ -114,7 +127,7 @@ class RequestM[T](val promise:Promise[_]) {
         filtered.resolve(Success(v))
       }
     }
-    handle(filteringCb)
+    handleSucc(filteringCb)
     filtered
   }
   

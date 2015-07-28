@@ -1,5 +1,7 @@
 package org.querki.requester
 
+import scala.util.{Try,Success,Failure}
+
 import akka.actor._
 
 /**
@@ -65,6 +67,27 @@ object ComprehensionTests {
     }    
   }
   
+  case class StartWith(errorP:Boolean)
+  
+  class CompleteExponent extends QTestActor {
+    def doReceive = {
+      case StartWith(errorP) => {
+        val rm = for {
+          four <- doubler.requestFor[Int](2)
+          eight <- doubler.requestFor[Int](four)
+          dummy = if (errorP) throw new Exception("BOOM")
+          sixteen <- doubler.requestFor[Int](eight)
+        }
+          yield sixteen
+          
+        rm onComplete {
+          case Success(sixteen) => sender ! sixteen
+          case Failure(ex) => sender ! ex
+        }
+      }
+    }    
+  }
+  
   case class Terms(seed:Int, exp:Int)
   
   class Exponent extends QTestActor {
@@ -107,6 +130,19 @@ class ComprehensionTests extends RequesterTests {
       val exp = system.actorOf(Props(classOf[MapExponent]))
       exp ! Start
       expectMsg(16)      
+    }
+    
+    "be able to use onComplete for success" in {
+      val exp = system.actorOf(Props(classOf[CompleteExponent]))
+      exp ! StartWith(false)
+      expectMsg(16)
+    }
+    
+    "be able to use onComplete for failure" in {
+      val exp = system.actorOf(Props(classOf[CompleteExponent]))
+      exp ! StartWith(true)
+      val ex = expectMsgClass(dur, classOf[Exception])
+      assert(ex.getMessage == "BOOM")
     }
     
     "be able to recursively flatMap" in {
