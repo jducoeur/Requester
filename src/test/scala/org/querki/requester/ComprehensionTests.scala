@@ -13,19 +13,19 @@ object ComprehensionTests {
   case object There
   case object World
   
-  class Answering extends Actor with Requester {
-    def receive = handleRequestResponse orElse {
+  class Answering extends QTestActor {
+    def doReceive = {
       case Hello => sender ! Response("Hello")
       case There => sender ! Response(" there,")
       case World => sender ! Response(" world!")
     }
   }
   
-  class Asking extends Actor with Requester {
+  class Asking extends QTestActor {
     
     lazy val answers = context.actorOf(Props(classOf[Answering]))
     
-    def receive = handleRequestResponse orElse {
+    def doReceive = {
       case Start => {
         for {
           Response(hello) <- answers.request(Hello)
@@ -37,10 +37,8 @@ object ComprehensionTests {
     }
   }
   
-  class RawExponent extends Actor with Requester {
-    lazy val doubler = context.actorOf(Props(classOf[Doubler]))
-    
-    def receive = handleRequestResponse orElse {
+  class RawExponent extends QTestActor {
+    def doReceive = {
       case Start => {
         for {
           four <- doubler.requestFor[Int](2)
@@ -52,16 +50,13 @@ object ComprehensionTests {
     }
   }
   
-  class MapExponent extends Actor with Requester {
-    lazy val doubler = context.actorOf(Props(classOf[Doubler]))
-    
-    def receive = handleRequestResponse orElse {
+  class MapExponent extends QTestActor {
+    def doReceive = {
       case Start => {
         val rm = for {
           four <- doubler.requestFor[Int](2)
           eight <- doubler.requestFor[Int](four)
           sixteen <- doubler.requestFor[Int](eight)
-          dummy = println(s"sixteen = $sixteen")
         }
           yield sixteen
           
@@ -72,10 +67,8 @@ object ComprehensionTests {
   
   case class Terms(seed:Int, exp:Int)
   
-  class Exponent extends Actor with Requester {
-    lazy val doubler = context.actorOf(Props(classOf[Doubler]))
-    
-    def receive = handleRequestResponse orElse {
+  class Exponent extends QTestActor {
+    def doReceive = {
       case Terms(seed, exp) => askDoubler(seed, exp) foreach { result => sender ! result }
     }
     

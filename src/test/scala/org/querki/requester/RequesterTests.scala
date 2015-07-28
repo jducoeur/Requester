@@ -24,3 +24,11 @@ class Doubler extends Actor {
     case n:Int => sender ! n*2
   }
 }
+
+abstract class QTestActor extends Actor with Requester {
+  lazy val doubler = context.actorOf(Props(classOf[Doubler]))
+  
+  def doReceive:Receive
+  
+  def receive = handleRequestResponse orElse doReceive
+}
