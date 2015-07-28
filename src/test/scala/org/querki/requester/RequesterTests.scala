@@ -18,3 +18,9 @@ class RequesterTests extends TestKit(ActorSystem("RequesterTests"))
     TestKit.shutdownActorSystem(system)
   }
 }
+
+class Doubler extends Actor {
+  def receive = {
+    case n:Int => sender ! n*2
+  }
+}

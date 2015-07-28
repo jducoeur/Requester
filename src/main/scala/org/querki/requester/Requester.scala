@@ -28,7 +28,7 @@ class RequestM[T](val promise:Promise[_]) {
    */
   private var callbacks = List.empty[Function[T, _]]
   
-  private def propagateError(th:Throwable) = {
+  private [requester] def propagateError(th:Throwable) = {
     if (promise eq Requester.emptyPromise) {
       // Do nothing -- we don't have a real promise to fulfill
       println(s"$this got error $th")
@@ -75,8 +75,14 @@ class RequestM[T](val promise:Promise[_]) {
   }
   
   def flatMap[U](handler:T => RequestM[U]):RequestM[U] = {
-    handle(handler)
     val child:RequestM[U] = new RequestM(promise)
+    // When the flatMapped function finishes up, return that up the chain:
+    val wrappedHandler:Function[T,RequestM[U]] = { v =>
+      val subHandler = handler(v)
+      subHandler.handle { u:U => child.resolve(Success(u)) }
+      subHandler
+    }
+    handle(wrappedHandler)
     child
   }
   
@@ -92,6 +98,20 @@ class RequestM[T](val promise:Promise[_]) {
   }
   
   def withFilter(p:T => Boolean):RequestM[T] = filter(p)
+}
+
+object RequestM {
+  def successful[T](result:T)(implicit promise:Promise[_] = Requester.emptyPromise):RequestM[T] = {
+    val r = new RequestM[T](promise)
+    r.resolve(Success(result))
+    r
+  }
+  
+  def failed[T](ex:Throwable)(implicit promise:Promise[T] = Requester.emptyPromise):RequestM[T] = {
+    val r = new RequestM[T](promise)
+    r.propagateError(ex)
+    r
+  }
 }
 
 /**
