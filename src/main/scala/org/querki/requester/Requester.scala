@@ -13,13 +13,9 @@ import akka.util.Timeout
  * The request "monad". It's actually a bit suspicious, in that it's mutable, but by and
  * large this behaves the way you expect a monad to work. In particular, it works with for
  * comprehensions, allowing you to compose requests much the way you normally do Futures.
- * 
- * @param promise If this request had an implicit Promise in scope, that Promise gets saved
- *   away here. This is mainly so that exceptions can properly fail the Promise. If there is
- *   no implicit Promise, this will be set to Requester.emptyPromise, which is simply a signal
- *   that there isn't really one.
+ * But since it is mutable, it should never be used outside the context of an Actor.
  */
-class RequestM[T](val promise:Promise[_]) {
+class RequestM[T] {
   /**
    * The actions to take after this Request resolves.
    * 
@@ -37,23 +33,12 @@ class RequestM[T](val promise:Promise[_]) {
    */
   private var result:Option[Try[T]] = None
   
-  private [requester] def propagateError(th:Throwable) = {
-    if (promise eq Requester.emptyPromise) {
-      // Do nothing -- we don't have a real promise to fulfill
-      println(s"$this got error $th")
-      // TBD: should we crash the requester?
-    } else {
-      // We've failed, so stop here and report the exception
-      promise.failure(th)
-    }    
-  }
-  
   private [requester] def resolve(v:Try[T]):Unit = {
     result = Some(v)
     try {
       callbacks foreach { cb => cb(v) }
     } catch {
-      case th:Throwable => propagateError(th)
+      case th:Throwable => // Should we do anything about Exceptions raised downstream?
     }
   }
   
@@ -64,6 +49,7 @@ class RequestM[T](val promise:Promise[_]) {
     }
   }
   
+  // TODO: This should probably become onSuccess
   def handleSucc(handler:T => _):Unit = {
     onComplete { t:Try[T] =>
       t match {
@@ -81,7 +67,7 @@ class RequestM[T](val promise:Promise[_]) {
     // What's going on here? I need to synchronously return a new RequestM, but I won't
     // actually complete until sometime later. So when I *do* complete, pipe that result
     // into the given handler function, and use that to resolve the returned child.
-    val child:RequestM[U] = new RequestM(promise)
+    val child:RequestM[U] = new RequestM
     onComplete {
       case Success(v) => {
         try {
@@ -104,7 +90,7 @@ class RequestM[T](val promise:Promise[_]) {
     // some indefinite time in the future. So we need to create a new one right now,
     // and when the real one comes into existence, link its success to that of the one
     // we're returning here.
-    val child:RequestM[U] = new RequestM(promise)
+    val child:RequestM[U] = new RequestM
     onComplete {
       case Success(v) => {
         try {
@@ -121,7 +107,7 @@ class RequestM[T](val promise:Promise[_]) {
   }
   
   def filter(p:T => Boolean):RequestM[T] = {
-    val filtered = new RequestM[T](promise)
+    val filtered = new RequestM[T]
     val filteringCb:Function[T,_] = { v:T =>
       if (p(v)) {
         filtered.resolve(Success(v))
@@ -135,15 +121,15 @@ class RequestM[T](val promise:Promise[_]) {
 }
 
 object RequestM {
-  def successful[T](result:T)(implicit promise:Promise[_] = Requester.emptyPromise):RequestM[T] = {
-    val r = new RequestM[T](promise)
+  def successful[T](result:T):RequestM[T] = {
+    val r = new RequestM[T]
     r.resolve(Success(result))
     r
   }
   
-  def failed[T](ex:Throwable)(implicit promise:Promise[T] = Requester.emptyPromise):RequestM[T] = {
-    val r = new RequestM[T](promise)
-    r.propagateError(ex)
+  def failed[T](ex:Throwable):RequestM[T] = {
+    val r = new RequestM[T]
+    r.resolve(Failure(ex))
     r
   }
 }
@@ -190,10 +176,9 @@ trait RequesterImplicits {
      * can map the RequestM to a PartialFunction in order to handle several possible returns.
      * 
      * @param msg The message to send to the target actor.
-     * @param promise If there is an implicit Promise in scope, errors will cause that Promise to fail.
      */
-    def request(msg:Any)(implicit promise:Promise[_] = Requester.emptyPromise):RequestM[Any] = {
-      val req = new RequestM[Any](promise)
+    def request(msg:Any):RequestM[Any] = {
+      val req = new RequestM[Any]
       requester.doRequest[Any](target, msg, req)
       req
     }
@@ -204,8 +189,8 @@ trait RequesterImplicits {
      * This works pretty much exactly like request, but expects that the response will be of type T. It will
      * throw a ClassCastException if anything else is received. Otherwise, it is identical to request().
      */
-    def requestFor[T](msg:Any)(implicit promise:Promise[_] = Requester.emptyPromise, tag: ClassTag[T]):RequestM[T] = {
-      val req = new RequestM[T](promise)
+    def requestFor[T](msg:Any)(implicit tag: ClassTag[T]):RequestM[T] = {
+      val req = new RequestM[T]
       requester.doRequest[T](target, msg, req)
       req
     }
@@ -221,8 +206,8 @@ trait RequesterImplicits {
    * at the top), it will quietly turn the Future into a Request. If Request isn't already expected, though, you'll have
    * to specify loopback explicitly.
    */
-  implicit def loopback[T](f:Future[T])(implicit promise:Promise[_] = Requester.emptyPromise, tag:ClassTag[T]):RequestM[T] = {
-    val req = new RequestM[T](promise)
+  implicit def loopback[T](f:Future[T])(implicit tag:ClassTag[T]):RequestM[T] = {
+    val req = new RequestM[T]
     requester.doRequestGuts[T](f, req)
     req
   }
@@ -341,12 +326,4 @@ trait Requester extends Actor with RequesterImplicits {
   def handleRequestResponse:Actor.Receive = {
     case resp:RequestedResponse[_] => resp.invoke
   }
-}
-
-object Requester {
-  /**
-   * This is the default Promise, used if there isn't an implicit one in scope. It signals that there is
-   * *not* a Future being worked on, so we shouldn't try sticking Exceptions into it.
-   */
-  val emptyPromise = Promise[Unit]
 }
