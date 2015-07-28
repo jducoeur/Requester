@@ -28,6 +28,15 @@ class RequestM[T](val promise:Promise[_]) {
    */
   private var callbacks = List.empty[Function[T, _]]
   
+  /**
+   * Store the result, so that if someone hooks a callback into me after I'm resolved, I
+   * can handle that immediately. (This can happen if, for example, RequestM.successful()
+   * comes into play.)
+   * 
+   * Yes, also mutable. Same argument. Deal.
+   */
+  private var result:Option[T] = None
+  
   private [requester] def propagateError(th:Throwable) = {
     if (promise eq Requester.emptyPromise) {
       // Do nothing -- we don't have a real promise to fulfill
@@ -43,6 +52,7 @@ class RequestM[T](val promise:Promise[_]) {
     v match {
       case Success(v) => {
         try {
+          result = Some(v)
           callbacks foreach { cb => cb(v) }
         } catch {
           case th:Throwable => propagateError(th)
@@ -53,7 +63,10 @@ class RequestM[T](val promise:Promise[_]) {
   }
   
   def handle(handler:T => _):Unit = {
-    callbacks :+= handler
+    result match {
+      case Some(v) => handler(v)
+      case None => callbacks :+= handler
+    }
   }
   
   def foreach(handler:T => Unit):Unit = {
@@ -64,6 +77,9 @@ class RequestM[T](val promise:Promise[_]) {
   }
   
   def map[U](handler:T => U):RequestM[U] = {
+    // What's going on here? I need to synchronously return a new RequestM, but I won't
+    // actually complete until sometime later. So when I *do* complete, pipe that result
+    // into the given handler function, and use that to resolve the returned child.
     val child:RequestM[U] = new RequestM(promise)
     val wrappedHandler:Function[T,U] = { v =>
       val result = handler(v)
@@ -75,8 +91,13 @@ class RequestM[T](val promise:Promise[_]) {
   }
   
   def flatMap[U](handler:T => RequestM[U]):RequestM[U] = {
+    // What's going on here? The problem we have is that we need to return a RequestM
+    // *synchronously* from flatMap, so that higher-level code can compose on it. But
+    // the *real* RequestM being returned from handler won't come into existence until
+    // some indefinite time in the future. So we need to create a new one right now,
+    // and when the real one comes into existence, link its success to that of the one
+    // we're returning here.
     val child:RequestM[U] = new RequestM(promise)
-    // When the flatMapped function finishes up, return that up the chain:
     val wrappedHandler:Function[T,RequestM[U]] = { v =>
       val subHandler = handler(v)
       subHandler.handle { u:U => child.resolve(Success(u)) }

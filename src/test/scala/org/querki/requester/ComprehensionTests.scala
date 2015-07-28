@@ -76,17 +76,14 @@ object ComprehensionTests {
     lazy val doubler = context.actorOf(Props(classOf[Doubler]))
     
     def receive = handleRequestResponse orElse {
-      case Terms(seed, exp) => askDoubler(seed, exp) foreach { result => println(s"Got final result $result"); sender ! result }
+      case Terms(seed, exp) => askDoubler(seed, exp) foreach { result => sender ! result }
     }
     
     def askDoubler(seed:Int, exp:Int):RequestM[Int] = {
       if (exp == 1) {
-        println(s"Setting result to $seed")
         RequestM.successful(seed)
       } else {
-        println(s"Asking doubler to double $seed")
         doubler.requestFor[Int](seed) flatMap { doubled =>
-          println(s"Got response $doubled")
           askDoubler(doubled, exp - 1)
         }
       }
@@ -118,11 +115,11 @@ class ComprehensionTests extends RequesterTests {
       exp ! Start
       expectMsg(16)      
     }
-//    
-//    "be able to recursively flatMap" in {
-//      val exp = system.actorOf(Props(classOf[Exponent]))
-//      exp ! Terms(2,4)
-//      expectMsg(16)
-//    }
+    
+    "be able to recursively flatMap" in {
+      val exp = system.actorOf(Props(classOf[Exponent]))
+      exp ! Terms(2,4)
+      expectMsg(16)
+    }
   }
 }
