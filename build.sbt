@@ -10,7 +10,7 @@ name := "Requester library for Akka"
 
 normalizedName := "requester"
 
-version := "1.1"
+version := "2.0-SNAPSHOT"
 
 organization := "org.querki"
 

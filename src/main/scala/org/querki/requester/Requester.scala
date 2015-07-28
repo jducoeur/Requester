@@ -142,8 +142,8 @@ object RequestM {
  * capability. Those other classes must have access to a Requester -- usually, they should be
  * functional classes owned *by* a Requester.
  * 
- * This trait gives you the functions that you actually call directly -- request(), requestFor()
- * and requestFuture(). But those calls mostly create RequestM objects, and the actual work gets
+ * This trait gives you the functions that you actually call directly -- request() and requestFor().
+ * But those calls mostly create RequestM objects, and the actual work gets
  * done by the associated Requester.
  */
 trait RequesterImplicits {
@@ -154,33 +154,6 @@ trait RequesterImplicits {
    * does all the real work. (If you are using this from within Requester, it's already set.)
    */
   def requester:Requester
-    
-  /**
-   * This is a wrapper, intended to surround a request clause whose value you want to return
-   * as a Future. There is no magic here -- it is simply syntactic sugar to make this pattern
-   * easier. You should use it along these lines:
-   * {{{
-   * requestFuture[TargetType] { implicit promise =>
-   *   for {
-   *     v1 <- someActor.request(MyMessage)
-   *     v2 <- anotherActor.request(AnotherMessage(v1))
-   *   }
-   *     promise.success(v2)
-   * }
-   * }}}
-   * That is, requestFuture expects a block that takes a Promise of the type you want to return.
-   * This block should declare that Promise as implicit -- that implicit Promise gets sucked into
-   * the requests, and is used if an exception is thrown.
-   * 
-   * @param reqFunc An arbitrarily-complex request clause, which eventually calls promise.success()
-   *   when it gets the desired answer.
-   * @return A Future of the specified type, which is hooked into the requests.
-   */
-  def requestFuture[R](reqFunc:Promise[R] => Any)(implicit tag: ClassTag[R]):Future[R] = {
-    val promise = Promise[R]
-    reqFunc(promise)
-    promise.future
-  }
   
   /**
    * Hook to add the request() methods to a third-party Actor.
@@ -239,6 +212,19 @@ trait RequesterImplicits {
     val req = new RequestM[T](promise)
     requester.doRequestGuts[T](f, req)
     req
+  }
+  
+  /**
+   * Convert a Request into a Future.
+   * 
+   * Sometimes, at the edges of the API, you need to think in terms of Futures. When this is necessary,
+   * this implicit will take your RequestM and turn it into a Future of the matching type.
+   */
+  implicit def request2Future[T](req:RequestM[T]):Future[T] = {
+    val promise = Promise[T]
+    // TODO: this should work for failures as well:
+    req foreach { t => promise.success(t) }
+    promise.future
   }
 }
 

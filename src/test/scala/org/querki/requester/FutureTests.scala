@@ -14,17 +14,16 @@ object FutureTests {
   case object Start
   case class TestFuture(f:Future[Int])
   
-  class FutureActor extends QTestActor {
+  class NewFutureActor extends QTestActor {
     def doReceive = {
       case Start => {
-        val f = requestFuture[Int] { implicit promise =>
+        val f:Future[Int] =
           for {
             four <- doubler.requestFor[Int](2)
             eight <- doubler.requestFor[Int](four)
             sixteen <- doubler.requestFor[Int](eight)
           }
-            promise.success(sixteen)
-        }
+            yield sixteen
         
         sender ! TestFuture(f)
       }
@@ -38,8 +37,8 @@ class FutureTests extends RequesterTests with Futures with ScalaFutures {
   implicit val dur = 1 second
   
   "Requester" should {
-    "be able to work through a Future, old-style" in {
-      val actor = system.actorOf(Props(classOf[FutureActor]))
+    "be able to work through a Future, new-style" in {
+      val actor = system.actorOf(Props(classOf[NewFutureActor]))
       actor ! Start
       val TestFuture(fut) = receiveOne(dur)
       whenReady(fut) { n =>
