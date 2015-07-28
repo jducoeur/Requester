@@ -4,6 +4,8 @@ sonatypeSettings
 
 lazy val root = project.in(file("."))
 
+lazy val akkaV = "2.3.11"
+
 name := "Requester library for Akka"
 
 normalizedName := "requester"
@@ -16,7 +18,11 @@ scalaVersion := "2.11.6"
 
 crossScalaVersions := Seq("2.10.4", "2.11.6")
 
-libraryDependencies += "com.typesafe.akka" %% "akka-actor" % "2.3.9"
+libraryDependencies ++= Seq(
+  "com.typesafe.akka" %% "akka-actor" % akkaV,
+  "com.typesafe.akka" %% "akka-testkit" % akkaV,
+  "org.scalatest" %% "scalatest" % "2.2.4" % "test"
+)
   
 homepage := Some(url("http://www.querki.net/"))
 
