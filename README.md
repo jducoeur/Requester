@@ -86,7 +86,7 @@ def receive = handleRequestResponse orElse {
   case _ => stash()
 }
 ```
-In this example, if we didn't have handleReceiveResponse there, the response to `LoadMe` would get stashed along with everything else, never processed, and the Actor would simply hang in its Start state. But putting handleReceiveResponse at the front deals with the loopbacks before that stash, so everything works.
+In this example, if we didn't have handleRequestResponse there, the response to `LoadMe` would get stashed along with everything else, never processed, and the Actor would simply hang in its Start state. But putting handleRequestResponse at the front deals with the loopbacks before that stash, so everything works.
 
 ### `request` and Futures
 
