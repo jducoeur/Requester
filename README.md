@@ -10,8 +10,8 @@ This library introduces `request`, which you can think of as the better-behaved 
 ```
 case GetSpacesStatus(requester) => {
   for {
-    ActiveThings(nConvs) <- conversations.request(GetActiveThings)
-    ActiveSessions(nSessions) <- sessions.request(GetActiveSessions)
+    ActiveThings(nConvs) <- conversations ? GetActiveThings
+    ActiveSessions(nSessions) <- sessions ? GetActiveSessions
   }
     sender ! SpaceStatus(spaceId, state.displayName, nConvs, nSessions)
 }
@@ -22,74 +22,86 @@ and have it work just as you expect.
 
 To use Requester, add this to your libraryDependencies in sbt:
 ```
-"org.querki" %% "requester" % "1.1"
+"org.querki" %% "requester" % "2.0"
 ```
 
 ### Using Requester
 
-The most common and straightforward use case for Requester is when you have one Actor that wants to make requests of others. You enhance the *requesting* Actor (not the target!) with the Requester trait, and add handleRequestResponse to its receive function:
+The most common and straightforward use case for Requester is when you have one Actor that wants to make requests of others. You enhance the *requesting* Actor (not the target!) with the Requester trait:
 ```
 import org.querki.requester._
 
 class MyActor extends Actor with Requester {
-  def receive = handleRequestResponse orElse {
-    ... Your normal receive code...
-  }
+  ... your usual code ...
 }
 ```
 Once you've done that, you can write code like the example:
 ```
 case GetSpacesStatus(requester) => {
   for {
-    ActiveThings(nConvs) <- conversations.request(GetActiveThings)
-    ActiveSessions(nSessions) <- sessions.request(GetActiveSessions)
+    ActiveThings(nConvs) <- conversations ? GetActiveThings
+    ActiveSessions(nSessions) <- sessions ? GetActiveSessions
   }
     sender ! SpaceStatus(spaceId, state.displayName, nConvs, nSessions)
 }
 ```
 (All examples are real code from [Querki](https://www.querki.net/), sometimes a bit simplified.)
 
-Or for a simpler example that doesn't need to compose, just use `foreach`:
+Or if you don't need to compose, just use `foreach`:
 ```
 persister.request(LoadCommentsFor(thingId, state)) foreach {
   case AllCommentsFor(_, comments) => {
-    // Race condition check: some other request might have loaded this Thing's conversations while
-    // we were in the roundtrip. In that case, the already-existing copy is authoritative, because it
-    // might have mutated. (In other words, don't keep chasing the race round and round.)
-    val convs = loadedConversations.get(thingId) match {
-      case Some(newCs) => newCs
-      case None => {
-        val cs = buildConversations(comments)
-        loadedConversations += (thingId -> cs)
-        cs
-      }
+    val convs = {
+      val cs = buildConversations(comments)
+      loadedConversations += (thingId -> cs)
+      cs
     }
     f(convs)
   }
 }
 ```
-`request` returns a RequestM, which is more or less a monad -- it's actually slightly mutable, so don't assume perfectly-monadic behavior, but it works as expected inside a for comprehension, and deliberately mimics the core behavior of Future.
+`request` returns a RequestM, which is a monad that cheats a little -- it's actually slightly mutable, so don't assume perfectly-monadic behavior, but it works as expected inside a for comprehension, and deliberately mimics the core behavior of Future. The functions `map`, `flatMap`, `foreach`, `withFilter` and `onComplete` all work pretty much the same as they do in Future, and other methods of Future will likely be added over time.
 
 ### How it works
 
-`request` actually uses `ask` under the hood, but in a very precise and constrained way. It sends your message to the target Actor and gets the response via `ask`. However, it then loops that response (plus the handler) back as a message to this Actor. That is why you need to add `handleRequestResponse` to your receive handler -- this intercepts these loopbacks, and executes them in your main receive loop.
+`request` actually uses `ask` under the hood, but in a very precise and constrained way. It sends your message to the target Actor and gets the response via `ask`. However, it then loops that response (plus the handler) back as a message to this Actor, preserving the original value of `sender`. This way, the response is relatively safe to use (since it is being processed within the Actor's main receive function), and you still have the sender you expect.
+
+Note that the native function for Requester is `request()`. This is aliased to `?`, to mimic `akka.pattern.ask`. The name conflict is entirely intentional: using ask inside of a Requester is *usually* a bug, since it invites all sorts of accidental dangers. If you really want to use `ask()` inside of a Requester, do it with the full name.
+
+### handleRequestResponse
+
+Normally, Requester deals with this loopback automatically, by overriding `unhandled()`. However, in some exceptional cases this doesn't work -- in particular, if your receive function handles *all* messages, the loopback will never get to unhandled, so it will never get resolved. This can happen, for example, when using `stash()` aggressively during setup, stashing all messages until the Actor is fully initialized.
+
+In cases like this, you should put `handleReceiveResponse` at the front of your receive function, like this:
+```
+def receive = handleReceiveResponse orElse {
+  case Start => {
+    persister.requestFor[LoadedState](LoadMe(myId)) foreach { currentState =>
+      setState(currentState)
+      unstashAll()
+      become(normalReceive)
+    }
+  }
+  
+  case _ => stash()
+}
+```
+In this example, if we didn't have handleReceiveResponse there, the response to `LoadMe` would get stashed along with everything else, never processed, and the Actor would simply hang in its Start state. But putting handleReceiveResponse at the front deals with the loopbacks before that stash, so everything works.
 
 ### `request` and Futures
 
 In ordinary Akka, the above is usually enough: you usually use the results of your request-based computation to set local state in the Requester, or to send a response, typically back to `sender`. Occasionally, though, you may want to wrap the whole thing up into a Future -- this is particularly common when you are writing client/server RPC code, using Scala.js on the front end, [Autowire](https://github.com/lihaoyi/autowire) for the API communication, and Akka Actors implementing the back-end server implementation.
 
-For a case like this, you want to use the `requestFuture` adapter:
+For a case like this, there is an implicit conversion from RequestM[T] to Future[T], so you can write code like this:
 ```
 def doChangeProps(thing:Thing, props:PropMap):Future[PropertyChangeResponse] = {
-  requestFuture[PropertyChangeResponse] { implicit promise =>
-    self.request(createSelfRequest(ChangeProps2(thing.toThingId, props))) foreach {
-      case ThingFound(_, _) => promise.success(PropertyChanged)
-      case ThingError(ex, _) => promise.failure(new querki.api.GeneralChangeFailure("Error during save"))
-    } 
+  self.request(createSelfRequest(ChangeProps2(thing.toThingId, props))) map {
+    case ThingFound(_, _) => PropertyChanged
+    case ThingError(ex, _) => throw new querki.api.GeneralChangeFailure("Error during save")
   }
 }
 ```
-`requestFuture` is mostly just an optional bit of sugar, but it is very convenient for circumstances like this. `request` accepts an implicit Promise[_], which is created by `requestFuture`. (Note that the `promise` parameter must be marked implicit for things to work right.) If it finds that implicit Promise, then any thrown exceptions will be routed into it, so that the resulting Future will return Failed(exception), as you would expect.
+Note that the bulk of the code is doing a `request`, so it is returning a `RequestM[PropertyChangeResponse]`. Since we are in a context that expects a `Future[PropertyChangeResponse]`, the system implicitly does the conversion, and it works as you want it to.
 
 ### `requestFor`
 
@@ -102,7 +114,7 @@ notePersister.requestFor[CurrentNotifications](Load) foreach { notes =>
   self ! InitComplete
 }
 ```
-This makes the whole thing more strongly-typed upfront -- in the above code, the compiler knows that `notes` is a `CurrentNotifications` message. If anything other than `CurrentNotifications` is received, it will throw a `ClassCastException`.
+This makes the whole thing more strongly-typed upfront -- in the above code, the compiler knows that `notes` should be a `CurrentNotifications` message. If anything other than `CurrentNotifications` is received, it will throw a `ClassCastException`.
 
 ### loopback()
 
@@ -113,7 +125,9 @@ loopback() takes one parameter, a Future, and treats it like a Request -- it wra
 loopback() is implicit, so if the code already expects a RequestM (for instance, inside of a for comprehension that is led off by a request()), you can just use a Future and it will auto-convert to RequestM. For example:
 ```
 for {
+  // This returns a RequestM
   ThingConversations(convs) <- spaceRouter.requestFor[ThingConversations](ConversationRequest(rc.requesterOrAnon, rc.state.get.id, GetConversations(rc.thing.get.id)))
+  // This returns a Future
   identities <- IdentityAccess.getIdentities(getIds(convs).toSeq) 
 }
    ...
@@ -136,15 +150,21 @@ Because of the loopback, request necessarily increases the latency of processing
 
 Requester is powerful, and brings you back into the land of Akka sanity, but it isn't a panacea. In particular, remember that your `request` response handler will *always* be run asynchronously, in a later run through receive. The state of your Actor may well have changed since you sent your message -- be sure to keep that in mind when you are writing your response handler.
 
-Also, for the same reasons, using Requester with frequent `become` operations or with FSM is pretty fraught. While it isn't necessarily incompatible, I recommend using extreme caution if you are trying to combine these concepts. (This is no different from usual, though: FSM always requires care and thought about what you want to have happen when an obsolete request comes back.)
-
-There are no unit tests yet. This needs to be rectified.
+Also, for the same reasons, using Requester with frequent `become` operations or with FSM is pretty fraught. While it isn't necessarily incompatible, I recommend using caution if you are trying to combine these concepts. (This is no different from usual, though: FSM always requires care and thought about what you want to have happen when an obsolete request comes back.)
 
 While Requester is being used heavily in production at Querki, nobody else has used it as of this writing. Please give a yell if you come across bugs, and pull requests are welcomed.
 
 ### To Do
 
-Requester clearly ought to pair well with [Typed Actors](http://doc.akka.io/docs/akka/2.3.9/scala/typed-actors.html), but some surgery will be needed. Basically, we need to extend Requester to have a straightforward way to interpret any Future-producing function (not just ask) as a RequestM, automatically sussing the type that is implicit in the Future, and looping it back as normal. In principle this isn't difficult, but we need to think about how to minimize the boilerplate.
+Requester clearly ought to pair well with [Typed Actors](http://doc.akka.io/docs/akka/2.3.9/scala/typed-actors.html), but some surgery will be needed. (Unless Typed Actors do this loopback automatically under the hood, in which case Requester isn't necessary.) Basically, we need to extend Requester to have a straightforward way to interpret any Future-producing function (not just ask) as a RequestM, automatically sussing the type that is implicit in the Future, and looping it back as normal. In principle this isn't difficult, but we need to think about how to minimize the boilerplate.
+
+One possibility for the above: create a new implicit ExecutionContext, available on any Requester, which executes *all* Futures as loopbacks. In principle this seems like it would work in the general case, and would be an enormous win -- if we can do that, then RequestM might be able to go away, and you could simply do ordinary Future-based programming that would work properly. This is the ideal case, but needs more research to figure out if it is actually possible.
+
+At the moment, the timeout for requests is built into Requester as a member, instead of being an implicit to functions the way Futures usually work. This is very convenient, but I worry that it's too coarse-grained. We should think about whether it needs to be changed.
+
+### Change log
+
+* **2.0** -- Improved RequestM to make it compose properly, so you can mostly treat it as you expect from Futures. Added onComplete, so you can handle failures. Added an implicit to convert RequestM[T] to Future[T], which makes interoperability with Futures much easier, and removed the clunky requestFuture mechanism. unhandled() now deals with loopbacks, so you can usually just mix Requester in with no other changes and have it work. Added ? as a syntax for request, specifically to help prevent accidentally mixing the unsafe ask into a Requester.
 
 ### License
 
