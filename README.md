@@ -72,9 +72,9 @@ Note that the native function for Requester is `request()`. This is aliased to `
 
 Normally, Requester deals with this loopback automatically, by overriding `unhandled()`. However, in some exceptional cases this doesn't work -- in particular, if your receive function handles *all* messages, the loopback will never get to unhandled, so it will never get resolved. This can happen, for example, when using `stash()` aggressively during setup, stashing all messages until the Actor is fully initialized.
 
-In cases like this, you should put `handleReceiveResponse` at the front of your receive function, like this:
+In cases like this, you should put `handleRequestResponse` at the front of your receive function, like this:
 ```
-def receive = handleReceiveResponse orElse {
+def receive = handleRequestResponse orElse {
   case Start => {
     persister.requestFor[LoadedState](LoadMe(myId)) foreach { currentState =>
       setState(currentState)
