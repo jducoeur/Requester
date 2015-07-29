@@ -162,6 +162,10 @@ One possibility for the above: create a new implicit ExecutionContext, available
 
 At the moment, the timeout for requests is built into Requester as a member, instead of being an implicit to functions the way Futures usually work. This is very convenient, but I worry that it's too coarse-grained. We should think about whether it needs to be changed.
 
+I am pretty sure that withFilter() doesn't do the right thing yet. It needs to be adjusted so that its behavior matches that of Future.
+
+More unit tests are needed, especially around failure management.
+
 ### Change log
 
 * **2.0** -- Improved RequestM to make it compose properly, so you can mostly treat it as you expect from Futures. Added onComplete, so you can handle failures. Added an implicit to convert RequestM[T] to Future[T], which makes interoperability with Futures much easier, and removed the clunky requestFuture mechanism. unhandled() now deals with loopbacks, so you can usually just mix Requester in with no other changes and have it work. Added ? as a syntax for request, specifically to help prevent accidentally mixing the unsafe ask into a Requester.
