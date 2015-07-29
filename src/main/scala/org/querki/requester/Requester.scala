@@ -275,6 +275,28 @@ trait RequesterImplicits {
  * work properly, therefore, it is very important that, if your own Actor overrides unhandled, it calls
  * super.unhandled() for unknown messages!
  * 
+ * That unhandled() override is usually enough to catch the looped-back messages, so you usually just
+ * need to mix Requester into your Actor. However, if your Actor's receive function is intercepting *all*
+ * messages (so nothing makes it to unhandled), then you will need to call handleRequestResponse at the
+ * beginning of your receive; otherwise, your Actor can wind up deadlocked. This can particularly happen
+ * when using stash() during Actor startup:
+ * {{{
+ * def receive = handleRequestResponse orElse {
+ *   case Start => {
+ *     persistence.request(LoadMe(myId)) foreach { myState =>
+ *       setState(myState)
+ *       unstashAll()
+ *       become(mainReceive)
+ *     }
+ *   }
+ *   
+ *   case _ => stash()
+ * }
+ * }}}
+ * In this startup pattern, we are stashing all messages until the persister responds with the Actor's state.
+ * However, if we didn't have handleRequestResponse there, the response would also get stashed, so the
+ * Actor would never receive the state message, and the Actor would be stuck.
+ * 
  * IMPORTANT: Requester is *not* compatible with stateful versions of become() -- that is, if you are
  * using become() in a method where you are capturing the parameters in the closure of become(),
  * Requester will probably not work right. This is because the body of the response handler will capture
