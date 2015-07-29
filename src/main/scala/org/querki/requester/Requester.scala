@@ -336,7 +336,17 @@ trait Requester extends Actor with RequesterImplicits {
     }    
   }
   
-  override def unhandled(message: Any): Unit = {
+  /**
+   * Normally you don't need to invoke this manually -- Requester defines an unhandled()
+   * override that deals with these responses. But if your receive method intercepts *all*
+   * messages for some reason (for example, it stashes everything), then you should add
+   * this at the front of your receive so that it deals with responses.
+   */
+  def handleRequestResponse:Receive = {
+    case resp:RequestedResponse[_] => resp.invoke
+  }
+  
+  abstract override def unhandled(message: Any): Unit = {
     message match {
       case resp:RequestedResponse[_] => resp.invoke
       case other => super.unhandled(other)
