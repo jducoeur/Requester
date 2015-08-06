@@ -75,8 +75,8 @@ object ComprehensionTests {
       case StartWith(errorP) => {
         val rm = for {
           four <- doubler.requestFor[Int](2)
-          eight <- doubler.requestFor[Int](four)
           dummy = if (errorP) throw new Exception("BOOM")
+          eight <- doubler.requestFor[Int](four)
           sixteen <- doubler.requestFor[Int](eight)
         }
           yield sixteen

@@ -231,8 +231,10 @@ trait RequesterImplicits {
    */
   implicit def request2Future[T](req:RequestM[T]):Future[T] = {
     val promise = Promise[T]
-    // TODO: this should work for failures as well:
-    req foreach { t => promise.success(t) }
+    req onComplete {
+      case Success(v) => promise.success(v)
+      case Failure(ex) => promise.failure(ex)
+    }
     promise.future
   }
 }
