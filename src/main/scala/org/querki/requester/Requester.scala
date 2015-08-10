@@ -208,6 +208,25 @@ trait RequesterImplicits {
   }
   
   /**
+   * Similar to RequestableActorRef, but works with an ActorSelection.
+   */
+  implicit class RequestableActorSelection(target:ActorSelection) {
+    def request(msg:Any):RequestM[Any] = {
+      val req = new RequestM[Any]
+      requester.doRequestGuts[Any](target.ask(msg)(requester.requestTimeout), req)
+      req
+    }
+    
+    def requestFor[T](msg:Any)(implicit tag: ClassTag[T]):RequestM[T] = {
+      val req = new RequestM[T]
+      requester.doRequestGuts[T](target.ask(msg)(requester.requestTimeout), req)
+      req
+    }
+    
+    def ?(msg:Any):RequestM[Any] = request(msg)
+  }
+  
+  /**
    * Convert a Future into a Request.
    * 
    * This takes the specified Future, and runs it in the Requester's main loop, to make it properly safe. As usual,
