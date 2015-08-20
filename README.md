@@ -168,6 +168,8 @@ More unit tests are needed, especially around failure management.
 
 ### Change log
 
+* **2.1** -- If a Request is being auto-converted to a Future, Exceptions now propagate from the Request to the Future. request() and requestFor() now work with ActorSelection as well as ActorRef. Fixed the unwinding of nested flatMaps to work tail-recursively. (Previously, if you nested a *lot* of flatMaps together, they could throw a StackOverflow while unwinding at the end.)
+
 * **2.0** -- Improved RequestM to make it compose properly, so you can mostly treat it as you expect from Futures. Added onComplete, so you can handle failures. Added an implicit to convert RequestM[T] to Future[T], which makes interoperability with Futures much easier, and removed the clunky requestFuture mechanism. unhandled() now deals with loopbacks, so you can usually just mix Requester in with no other changes and have it work. Added ? as a syntax for request, specifically to help prevent accidentally mixing the unsafe ask into a Requester.
 
 ### License
