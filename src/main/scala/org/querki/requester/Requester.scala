@@ -1,5 +1,6 @@
 package org.querki.requester
 
+import scala.annotation.tailrec
 import scala.concurrent.duration._
 import scala.concurrent.{Future, Promise}
 import scala.util.{Try,Success,Failure}
@@ -10,7 +11,7 @@ import akka.pattern.ask
 import akka.util.Timeout
   
 /**
- * The request "monad". It's actually a bit suspicious, in that it's mutable, but by and
+ * The request "monad". It's actually a bit nasty, in that it's mutable, but by and
  * large this behaves the way you expect a monad to work. In particular, it works with for
  * comprehensions, allowing you to compose requests much the way you normally do Futures.
  * But since it is mutable, it should never be used outside the context of an Actor.
@@ -33,12 +34,50 @@ class RequestM[T] {
    */
   private var result:Option[Try[T]] = None
   
-  private [requester] def resolve(v:Try[T]):Unit = {
+  /**
+   * Build up a chain of RequestM's, from lower levels to higher, so that we can unwind results
+   * iteratively instead of through the callbacks.
+   * 
+   * This is rather ugly, but necessary. The original design did the unwinding completely cleanly,
+   * with each inner RequestM propagating its result by calling resolve() on the level above it.
+   * But that turned out to cause stack overflow crashes when you got to ~2000 levels of flatMap().
+   * So we need a mechanism that can be handled iteratively (well, tail-recursively) instead.
+   */
+  protected var higherLevel:Option[RequestM[T]] = None
+  protected def setHigherLevel(higher:RequestM[T]) = {
+    // Note that sometimes this gets called *after* it has already resolved. That will typically
+    // happen on the innermost flatMap(), which contains a synchronous map() that produces the
+    // end result. So we need to detect that and trigger unwinding when it happens.
+    result match {
+      case Some(res) => unwindHigherLevels(res, Some(higher))
+      case None => higherLevel = Some(higher)
+    }
+  }
+  @tailrec
+  private def unwindHigherLevels(v:Try[T], currentLevel:Option[RequestM[T]]):Unit = {
+    currentLevel match {
+      case Some(higher) => {
+        // Resolve the outer layers, but do *not* start more unwinding. This is key:
+        higher.resolve(v, false)
+        unwindHigherLevels(v, higher.higherLevel)
+      }
+      case None => // We're done unwinding, or didn't need to do it at all
+    }
+  }
+  
+  private [requester] def resolve(v:Try[T], startUnwind:Boolean = true):Unit = {
     result = Some(v)
     try {
       callbacks foreach { cb => cb(v) }
+      if (startUnwind) {
+        unwindHigherLevels(v, higherLevel)
+      }
     } catch {
-      case th:Throwable => // Should we do anything about Exceptions raised downstream?
+      case th:Throwable => {
+        // TODO: Is there anything useful we can/should do to propagate this error?
+        println(s"Exception while resolving Request: ${th.getMessage}")
+        th.printStackTrace()
+      }
     }
   }
   
@@ -83,19 +122,39 @@ class RequestM[T] {
     child
   }
   
+  /**
+   * The central flatMap() operation, which as in any Monad is key to composing these
+   * things together.
+   * 
+   * flatMap() is a bit tricky. The problem we have is that we need to return a RequestM
+   * *synchronously* from flatMap, so that higher-level code can compose on it. But
+   * the *real* RequestM being returned from handler won't come into existence until
+   * some indefinite time in the future. So we need to create a new one right now,
+   * and when the real one comes into existence, link its success to that of the one
+   * we're returning here.
+   * 
+   * The initial version of this was beautiful, elegant, and caused stack overflows if
+   * you nested flatMaps more than a couple thousand levels deep. (Which, yes, we occasionally do at
+   * Querki.) The issue comes during "unwinding" time, when the innermost RequestM finally gets
+   * set to a value. The original version had it then call resolve() on the one that contained it,
+   * which called resolve() on its parent, and so on, until we finally blew the stack.
+   * 
+   * So instead, flatMap builds an ugly but practical linked list of RequestM's, with each one
+   * essentially pointing to the one above it. We still call resolve() at each level, but those
+   * are *not* recursive; instead, we walk up the flatMap chain *tail*-recursively, resolving each node
+   * along the way. It's a bit less elegant, but doesn't cause the JVM to have conniptions. 
+   */
   def flatMap[U](handler:T => RequestM[U]):RequestM[U] = {
-    // What's going on here? The problem we have is that we need to return a RequestM
-    // *synchronously* from flatMap, so that higher-level code can compose on it. But
-    // the *real* RequestM being returned from handler won't come into existence until
-    // some indefinite time in the future. So we need to create a new one right now,
-    // and when the real one comes into existence, link its success to that of the one
-    // we're returning here.
     val child:RequestM[U] = new RequestM
     onComplete {
       case Success(v) => {
         try {
           val subHandler = handler(v)
-          subHandler.onComplete { u:Try[U] => child.resolve(u) }
+          // Note that flatMap specifically does *not* resolve this through onComplete any more.
+          // The commented-out line worked well, and was nicely elegant, but resulted in stack
+          // overflows. So instead we build an explicit chain, and unwind that way.
+          subHandler.setHigherLevel(child)
+//          subHandler.onComplete { u:Try[U] => child.resolve(u) }
           subHandler
         } catch {
           case th:Throwable => { child.resolve(Failure(th)) }
