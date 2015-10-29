@@ -7,7 +7,7 @@ import scala.util.{Try,Success,Failure}
 import scala.reflect.ClassTag
 
 import akka.actor._
-import akka.pattern.ask
+import akka.pattern.{ask, AskTimeoutException}
 import akka.util.Timeout
   
 /**
@@ -65,18 +65,31 @@ class RequestM[T] {
     }
   }
   
+  private [requester] def intercept(test:PartialFunction[Try[T], Boolean]) = _blocker = Some(test)
+  private var _blocker:Option[PartialFunction[Try[T], Boolean]] = None
+  
   private [requester] def resolve(v:Try[T], startUnwind:Boolean = true):Unit = {
-    result = Some(v)
-    try {
-      callbacks foreach { cb => cb(v) }
-      if (startUnwind) {
-        unwindHigherLevels(v, higherLevel)
-      }
-    } catch {
-      case th:Throwable => {
-        // TODO: Is there anything useful we can/should do to propagate this error?
-        println(s"Exception while resolving Request: ${th.getMessage}")
-        th.printStackTrace()
+    // We give the outside world a chance to prevent this from going through, in order to let the
+    // retry system work.
+    // TODO: this is ugly, and shouldn't be necessary if the functional interface was sufficiently
+    // rich. Think about how to make retries work differently.
+    val blocked = _blocker match {
+      case Some(blocker) => blocker(v)
+      case None => false
+    }
+    if (!blocked) {
+      result = Some(v)
+      try {
+        callbacks foreach { cb => cb(v) }
+        if (startUnwind) {
+          unwindHigherLevels(v, higherLevel)
+        }
+      } catch {
+        case th:Throwable => {
+          // TODO: Is there anything useful we can/should do to propagate this error?
+          println(s"Exception while resolving Request: ${th.getMessage}")
+          th.printStackTrace()
+        }
       }
     }
   }
@@ -235,11 +248,10 @@ trait RequesterImplicits {
      * can map the RequestM to a PartialFunction in order to handle several possible returns.
      * 
      * @param msg The message to send to the target actor.
+     * @param retries The number of times to retry this request, if it times out.
      */
-    def request(msg:Any):RequestM[Any] = {
-      val req = new RequestM[Any]
-      requester.doRequest[Any](target, msg, req)
-      req
+    def request(msg:Any, retries:Int = 0):RequestM[Any] = {
+      requestFor[Any](msg, retries)
     }
     
     /**
@@ -248,9 +260,26 @@ trait RequesterImplicits {
      * This works pretty much exactly like request, but expects that the response will be of type T. It will
      * throw a ClassCastException if anything else is received. Otherwise, it is identical to request().
      */
-    def requestFor[T](msg:Any)(implicit tag: ClassTag[T]):RequestM[T] = {
+    def requestFor[T](msg:Any, retriesInit:Int = 0)(implicit tag: ClassTag[T]):RequestM[T] = {
       val req = new RequestM[T]
       requester.doRequest[T](target, msg, req)
+      var retries = retriesInit
+      req.intercept {
+        // We replace AskTimeoutException with retries, and maybe with RequestRetriesExhausted.
+        // TODO: there is probably a better way to do this, but it likely involves inventing something
+        // like RequestM.transform().
+        case Failure(ex:AskTimeoutException) => {
+          if (retries > 0) {
+            retries -= 1
+            requester.doRequest[T](target, msg, req)
+            true
+          } else {
+            // No, really -- we're giving up and letting the timeout happen:
+            false
+          }
+        }
+        case _ => false
+      }
       req
     }
     
@@ -271,9 +300,7 @@ trait RequesterImplicits {
    */
   implicit class RequestableActorSelection(target:ActorSelection) {
     def request(msg:Any):RequestM[Any] = {
-      val req = new RequestM[Any]
-      requester.doRequestGuts[Any](target.ask(msg)(requester.requestTimeout), req)
-      req
+      requestFor[Any](msg)
     }
     
     def requestFor[T](msg:Any)(implicit tag: ClassTag[T]):RequestM[T] = {
