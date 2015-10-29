@@ -22,7 +22,7 @@ and have it work just as you expect.
 
 To use Requester, add this to your libraryDependencies in sbt:
 ```
-"org.querki" %% "requester" % "2.1"
+"org.querki" %% "requester" % "2.2"
 ```
 
 ### Using Requester
@@ -115,6 +115,18 @@ notePersister.requestFor[CurrentNotifications](Load) foreach { notes =>
 }
 ```
 This makes the whole thing more strongly-typed upfront -- in the above code, the compiler knows that `notes` should be a `CurrentNotifications` message. If anything other than `CurrentNotifications` is received, it will throw a `ClassCastException`.
+
+### Retries
+
+`request` and `requestFor` actually have a second parameter -- the number of times to retry sending this request. Akka is explicitly unreliable: that's not as obvious when running on a single-node system (where message delivery usually succeeds), but when running multi-node that can be quite important. So it is *sometimes* appropriate to retry message sends once or twice when they fail.
+
+You can specify a retry simply by adding the parameter, like this:
+```
+myTarget.requestFor[Loaded](Load, 2) foreach { loaded => ...
+```
+This says that, if the request times out, Requester should retry up to 2 times. If it continues to fail, after the last retry the RequestM will fail with an `AskTimeoutException`, as usual.
+
+**Important:** retries aren't a panacea, and you can get yourself into real trouble with them if you're not careful. All this is doing is retrying if we don't get a *response*. That doesn't necessarily mean the request didn't get through. It could be that the response failed to get through, or that the request somehow caused an exception, or that that code pathway is broken, or that it's simply taking a long time. This easy retry mechanism can be helpful, but is not by any means the same thing as reliable message delivery. Think through the whole request/response cycle before using it -- in particular, whether getting a duplicate request is going to confuse the recipient.
 
 ### loopback()
 
