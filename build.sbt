@@ -1,27 +1,23 @@
-import SonatypeKeys._
-
-sonatypeSettings
-
 lazy val root = project.in(file("."))
 
-lazy val akkaV = "2.3.11"
+lazy val akkaV = "2.4.6"
 
 name := "Requester library for Akka"
 
 normalizedName := "requester"
 
-version := "2.2"
+version := "2.3"
 
 organization := "org.querki"
 
-scalaVersion := "2.11.6"
+scalaVersion := "2.11.8"
 
-crossScalaVersions := Seq("2.10.4", "2.11.6")
+crossScalaVersions := Seq("2.10.5", "2.11.8")
 
 libraryDependencies ++= Seq(
   "com.typesafe.akka" %% "akka-actor" % akkaV,
   "com.typesafe.akka" %% "akka-testkit" % akkaV,
-  "org.scalatest" %% "scalatest" % "2.2.4" % "test"
+  "org.scalatest" %% "scalatest" % "2.2.6" % "test"
 )
   
 homepage := Some(url("http://www.querki.net/"))
