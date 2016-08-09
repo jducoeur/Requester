@@ -6,7 +6,7 @@ name := "Requester library for Akka"
 
 normalizedName := "requester"
 
-version := "2.4-SNAPSHOT"
+version := "2.4"
 
 organization := "org.querki"
 
