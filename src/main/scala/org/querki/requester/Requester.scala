@@ -68,7 +68,17 @@ class RequestM[T] {
   private [requester] def intercept(test:PartialFunction[Try[T], Boolean]) = _blocker = Some(test)
   private var _blocker:Option[PartialFunction[Try[T], Boolean]] = None
   
-  private [requester] def resolve(v:Try[T], startUnwind:Boolean = true):Unit = {
+  /**
+   * Set the value for this RequestM, and run through its dependency chain.
+   * 
+   * You should *not* normally call this yourself -- it is mainly for internal use. Call this only
+   * when you have obtained a RequestM through prep(), and need to finish it up, usually because
+   * you have to work around some other concurrency construct. (Such as PersistentActor's persist()
+   * call.)
+   * 
+   * You should ignore the startUnwind flag, which is for internal use only.
+   */
+  def resolve(v:Try[T], startUnwind:Boolean = true):Unit = {
     // We give the outside world a chance to prevent this from going through, in order to let the
     // retry system work.
     // TODO: this is ugly, and shouldn't be necessary if the functional interface was sufficiently
@@ -203,6 +213,21 @@ object RequestM {
     val r = new RequestM[T]
     r.resolve(Failure(ex))
     r
+  }
+  
+  /**
+   * This returns a newly-created RequestM, outside of the usual Requester pathways. This
+   * is slightly dangerous, but useful -- think of it as the counterpart to creating a Promise
+   * and returning its .future. The difference here is that we're using the same object for
+   * both sides -- you can pass the returned RequestM around, map over it, and so on, and
+   * resolve it at the appropriate time.
+   * 
+   * If you use prep/resolve, it is your responsibility to call resolve only at a safe time,
+   * inside the Actor's receive loop. (Or inside persist() in a PersistentActor, or some such.)
+   * Do this only when necessary; normally, you should work through .request().
+   */
+  def prep[T]():RequestM[T] = {
+    new RequestM[T]
   }
 }
 
