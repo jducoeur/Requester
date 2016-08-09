@@ -7,7 +7,7 @@ On the other hand, `ask` is something of a landmine in practice, because it viol
 (Not to mention the fact that `sender` probably won't be set to the value you expect during the response handler. One of the easiest Akka traps to fall into is using `sender` during a Future, which almost never works.)
 
 This library introduces `request`, which you can think of as the better-behaved big brother of `ask`. The look and feel is similar, but there is one crucial difference: the response handler from `request` is *not* Future, and it runs inside the normal receive loop. Also, unlike `ask`, `request` preserves the value of `sender`. The result is that you can safely write straightforward, intuitive, composable code for complex multi-Actor operations, like this:
-```
+```scala
 case GetSpacesStatus(requester) => {
   for {
     ActiveThings(nConvs) <- conversations ? GetActiveThings
@@ -28,7 +28,7 @@ To use Requester, add this to your libraryDependencies in sbt:
 ### Using Requester
 
 The most common and straightforward use case for Requester is when you have one Actor that wants to make requests of others. You enhance the *requesting* Actor (not the target!) with the Requester trait:
-```
+```scala
 import org.querki.requester._
 
 class MyActor extends Actor with Requester {
@@ -36,7 +36,7 @@ class MyActor extends Actor with Requester {
 }
 ```
 Once you've done that, you can write code like the example:
-```
+```scala
 case GetSpacesStatus(requester) => {
   for {
     ActiveThings(nConvs) <- conversations ? GetActiveThings
@@ -48,7 +48,7 @@ case GetSpacesStatus(requester) => {
 (All examples are real code from [Querki](https://www.querki.net/), sometimes a bit simplified.)
 
 Or if you don't need to compose, just use `foreach`:
-```
+```scala
 persister.request(LoadCommentsFor(thingId, state)) foreach {
   case AllCommentsFor(_, comments) => {
     val convs = {
@@ -73,7 +73,7 @@ Note that the native function for Requester is `request()`. This is aliased to `
 Normally, Requester deals with this loopback automatically, by overriding `unhandled()`. However, in some exceptional cases this doesn't work -- in particular, if your receive function handles *all* messages, the loopback will never get to unhandled, so it will never get resolved. This can happen, for example, when using `stash()` aggressively during setup, stashing all messages until the Actor is fully initialized.
 
 In cases like this, you should put `handleRequestResponse` at the front of your receive function, like this:
-```
+```scala
 def receive = handleRequestResponse orElse {
   case Start => {
     persister.requestFor[LoadedState](LoadMe(myId)) foreach { currentState =>
@@ -93,7 +93,7 @@ In this example, if we didn't have handleRequestResponse there, the response to 
 In ordinary Akka, the above is usually enough: you usually use the results of your request-based computation to set local state in the Requester, or to send a response, typically back to `sender`. Occasionally, though, you may want to wrap the whole thing up into a Future -- this is particularly common when you are writing client/server RPC code, using Scala.js on the front end, [Autowire](https://github.com/lihaoyi/autowire) for the API communication, and Akka Actors implementing the back-end server implementation.
 
 For a case like this, there is an implicit conversion from RequestM[T] to Future[T], so you can write code like this:
-```
+```scala
 def doChangeProps(thing:Thing, props:PropMap):Future[PropertyChangeResponse] = {
   self.request(createSelfRequest(ChangeProps2(thing.toThingId, props))) map {
     case ThingFound(_, _) => PropertyChanged
@@ -106,7 +106,7 @@ Note that the bulk of the code is doing a `request`, so it is returning a `Reque
 ### `requestFor`
 
 The ordinary `request` call returns Any, as is usual in Akka. Sometimes, it is clearer to be able to state upfront what type you expect to receive, especially if there is only one "right" answer. `requestFor` is a variant of `request` that allows you to state this:
-```
+```scala
 notePersister.requestFor[CurrentNotifications](Load) foreach { notes =>
   currentNotes = notes.notes.sortBy(_.id).reverse
 	    
@@ -121,7 +121,7 @@ This makes the whole thing more strongly-typed upfront -- in the above code, the
 `request` and `requestFor` actually have a second parameter -- the number of times to retry sending this request. Akka is explicitly unreliable: that's not as obvious when running on a single-node system (where message delivery usually succeeds), but when running multi-node that can be quite important. So it is *sometimes* appropriate to retry message sends once or twice when they fail.
 
 You can specify a retry simply by adding the parameter, like this:
-```
+```scala
 myTarget.requestFor[Loaded](Load, 2) foreach { loaded => ...
 ```
 This says that, if the request times out, Requester should retry up to 2 times. If it continues to fail, after the last retry the RequestM will fail with an `AskTimeoutException`, as usual.
@@ -135,7 +135,7 @@ Requester is primarily focused on the common case where you are trying to send a
 loopback() takes one parameter, a Future, and treats it like a Request -- it wraps the Future inside of a RequestM, so that when the Future completes, it will execute the subsequent functions (foreach and map) looped back in the main loop of the Actor. As with an ordinary Request, sender is preserved across this operation.
 
 loopback() is implicit, so if the code already expects a RequestM (for instance, inside of a for comprehension that is led off by a request()), you can just use a Future and it will auto-convert to RequestM. For example:
-```
+```scala
 for {
   // This returns a RequestM
   ThingConversations(convs) <- spaceRouter.requestFor[ThingConversations](ConversationRequest(rc.requesterOrAnon, rc.state.get.id, GetConversations(rc.thing.get.id)))
@@ -155,6 +155,35 @@ The above is all fine so long as you are sending your requests from directly ins
 If you want one of these outside classes to be able to use `request`, then you should have it inherit from the RequesterImplicits trait, and override that trait's `requester` member to point to the controlling Requester Actor.
 
 RequesterImplicits actually defines `request`, `requestFor` and `requestFuture`; it delegates the actual processing to the associated Requester. (Requester itself implements RequesterImplicits, so you can just ignore this for the ordinary case.)
+
+### `Promise`-like Constructions
+
+The above covers *most* situations where you want to use RequestM. But what about the down-and-dirty situations, where you have to want to compose complex but relatively primitive interactions safely? These are the sorts of situations where, if you were using `Future`s, you would need to bring `Promise` into play. The corresponding concepts in Requester are the `prep()` and `resolve()` methods.
+
+`RequestM.prep[T]()` creates a new, raw `RequestM[T]`, containing no value and not in any conventional workflow -- it's just a `RequestM`. Sometime after you have that, you call `.resolve(v:Try[T])` on that `RequestM`, to set its value and (more importantly) fire off any subsequent requests that have been mapped onto it.
+
+You would typically use this in situations where need to pass a `RequestM` around externally-defined walls. For example, Akka's `PersistentActor` centers on the method `persist[T](evt:T)(handler:T => Unit):Unit`. Note that this returns a Unit. So how do you compose this operation? How do I return something that allows other functions to do something *after* my handler? You would do that like this:
+```scala
+def myPersist[T, U](evtIn:T)(handler:T => U):RequestM[U] = {
+  val rm = RequestM.prep[U]
+  persist(evtIn) { evt =>
+    val result = handler(evt)
+    rm.resolve(Success(result))
+  }
+  rm
+}
+```
+This persists the event as usual, but returns a `RequestM` that can be mapped and flatMapped, and those mappings will execute immediately after the handler executes. That way, you can build composable flows. (This is especially useful in Akka Persistence when you have multiple commands that can result in the same event, but want somewhat different responses afterwards.)
+
+It's reasonable to ask, "So why not just use `Promise` and `Future` here?" That's entirely an option. Using `prep`/`resolve` has two advantages:
+* Since it is using a RequestM, it combines well with other RequestM-based code, and doesn't require polluting your Actor with potentially dangerous Futures.
+* Any additional functions that are mapped onto the returned `RequestM` are guaranteed to be executed synchronously in the same thread where `resolve` was called, so the threading is safe and predictable.
+
+It is your responsibility to only call `resolve` in an "Actor-safe" thread -- during a `receive`, a `persist` handler, or some other safely single-threaded point.
+
+Note that `resolve` takes a `Try[T]` -- you can use it to resolve either `Success` or `Failure`.
+
+`resolve` is the heart of Requester, and is used internally to complete requests -- the conventional Requester workflow is to send an `ask`, loop the response back into the requester's `receive` function, and pass that response into `resolve`. Similarly, `RequestM.successful()` and `.failure()` simply create a `RequestM` and immediately call `resolve` on it. Thus, you can use `resolve` to build other, high-level constructs on top of `RequestM`.
 
 ### Caveats
 
@@ -179,6 +208,8 @@ I am pretty sure that withFilter() doesn't do the right thing yet. It needs to b
 More unit tests are needed, especially around failure management.
 
 ### Change log
+
+* **2.4** -- Added support for `prep()` and `resolve()`. `resolve` has always been there -- it's central to the system -- but had previously been private. It is now opened up, to allow `Promise`-like code.
 
 * **2.1** -- If a Request is being auto-converted to a Future, Exceptions now propagate from the Request to the Future. request() and requestFor() now work with ActorSelection as well as ActorRef. Fixed the unwinding of nested flatMaps to work tail-recursively. (Previously, if you nested a *lot* of flatMaps together, they could throw a StackOverflow while unwinding at the end.)
 
