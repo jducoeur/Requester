@@ -22,7 +22,7 @@ and have it work just as you expect.
 
 To use Requester, add this to your libraryDependencies in sbt:
 ```
-"org.querki" %% "requester" % "2.3"
+"org.querki" %% "requester" % "2.4"
 ```
 
 ### Using Requester
