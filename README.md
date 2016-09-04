@@ -62,6 +62,8 @@ persister.request(LoadCommentsFor(thingId, state)) foreach {
 ```
 `request` returns a RequestM, which is a monad that cheats a little -- it's actually slightly mutable, so don't assume perfectly-monadic behavior, but it works as expected inside a for comprehension, and deliberately mimics the core behavior of Future. The functions `map`, `flatMap`, `foreach`, `withFilter` and `onComplete` all work pretty much the same as they do in Future, and other methods of Future will likely be added over time.
 
+**Important:** since `request` is intended to replace `ask`, you should *not* be importing `akka.pattern._` (which is where `ask` comes from). If you have both imported, you will get a name conflict on `?`, and will have to use the wordier `request()` call instead.
+
 ### How it works
 
 `request` actually uses `ask` under the hood, but in a very precise and constrained way. It sends your message to the target Actor and gets the response via `ask`. However, it then loops that response (plus the handler) back as a message to this Actor, preserving the original value of `sender`. This way, the response is relatively safe to use (since it is being processed within the Actor's main receive function), and you still have the sender you expect.
