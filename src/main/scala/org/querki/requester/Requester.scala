@@ -16,7 +16,8 @@ import akka.util.Timeout
  * comprehensions, allowing you to compose requests much the way you normally do Futures.
  * But since it is mutable, it should never be used outside the context of an Actor.
  */
-class RequestM[T] {
+class RequestM[T](val enclosing:sourcecode.FullName, val method:sourcecode.Name, val file:sourcecode.File, val line:sourcecode.Line)
+{
   /**
    * The actions to take after this Request resolves.
    * 
@@ -49,7 +50,10 @@ class RequestM[T] {
     // happen on the innermost flatMap(), which contains a synchronous map() that produces the
     // end result. So we need to detect that and trigger unwinding when it happens.
     result match {
-      case Some(res) => unwindHigherLevels(res, Some(higher))
+      case Some(res) => {
+        setFailureStack(res)
+        unwindHigherLevels(res, Some(higher))
+      }
       case None => higherLevel = Some(higher)
     }
   }
@@ -62,6 +66,26 @@ class RequestM[T] {
         unwindHigherLevels(v, higher.higherLevel)
       }
       case None => // We're done unwinding, or didn't need to do it at all
+    }
+  }
+  
+  @tailrec 
+  private def buildFailureStackRec(rm:RequestM[_], stack:List[StackTraceElement]):List[StackTraceElement] = {
+    val withMe = new StackTraceElement(rm.enclosing.value, rm.method.value, rm.file.value, rm.line.value) :: stack
+    rm.higherLevel match {
+      case Some(higher) => buildFailureStackRec(higher, withMe)
+      case None => withMe
+    }
+  }
+  private def setFailureStack(t:Try[T]):Unit = {
+    t match {
+      case Success(_) =>
+      case Failure(ex) => {
+        val failStack = buildFailureStackRec(this, List.empty).reverse.toVector
+        val originalStack = ex.getStackTrace.toVector
+        val fullStack = originalStack ++ failStack
+        ex.setStackTrace(fullStack.toArray)
+      }
     }
   }
   
@@ -90,6 +114,9 @@ class RequestM[T] {
     if (!blocked) {
       result = Some(v)
       try {
+        if (startUnwind) {
+          setFailureStack(v)
+        }
         callbacks foreach { cb => cb(v) }
         if (startUnwind) {
           unwindHigherLevels(v, higherLevel)
@@ -125,11 +152,11 @@ class RequestM[T] {
     handleSucc(handler)
   }
   
-  def map[U](handler:T => U):RequestM[U] = {
+  def map[U](handler:T => U)(implicit enclosing:sourcecode.FullName, file:sourcecode.File, line:sourcecode.Line):RequestM[U] = {
     // What's going on here? I need to synchronously return a new RequestM, but I won't
     // actually complete until sometime later. So when I *do* complete, pipe that result
     // into the given handler function, and use that to resolve the returned child.
-    val child:RequestM[U] = new RequestM
+    val child:RequestM[U] = new RequestM(enclosing, "map", file, line)
     onComplete {
       case Success(v) => {
         try {
@@ -167,8 +194,8 @@ class RequestM[T] {
    * are *not* recursive; instead, we walk up the flatMap chain *tail*-recursively, resolving each node
    * along the way. It's a bit less elegant, but doesn't cause the JVM to have conniptions. 
    */
-  def flatMap[U](handler:T => RequestM[U]):RequestM[U] = {
-    val child:RequestM[U] = new RequestM
+  def flatMap[U](handler:T => RequestM[U])(implicit enclosing:sourcecode.FullName, file:sourcecode.File, line:sourcecode.Line):RequestM[U] = {
+    val child:RequestM[U] = new RequestM(enclosing, "flatMap", file, line)
     onComplete {
       case Success(v) => {
         try {
@@ -188,8 +215,8 @@ class RequestM[T] {
     child
   }
   
-  def filter(p:T => Boolean):RequestM[T] = {
-    val filtered = new RequestM[T]
+  def filter(p:T => Boolean)(implicit enclosing:sourcecode.FullName, file:sourcecode.File, line:sourcecode.Line):RequestM[T] = {
+    val filtered = new RequestM[T](enclosing, "filter", file, line)
     val filteringCb:Function[T,_] = { v:T =>
       if (p(v)) {
         filtered.resolve(Success(v))
@@ -203,14 +230,14 @@ class RequestM[T] {
 }
 
 object RequestM {
-  def successful[T](result:T):RequestM[T] = {
-    val r = new RequestM[T]
+  def successful[T](result:T)(implicit enclosing:sourcecode.FullName, file:sourcecode.File, line:sourcecode.Line):RequestM[T] = {
+    val r = new RequestM[T](enclosing, "successful", file, line)
     r.resolve(Success(result))
     r
   }
   
-  def failed[T](ex:Throwable):RequestM[T] = {
-    val r = new RequestM[T]
+  def failed[T](ex:Throwable)(implicit enclosing:sourcecode.FullName, file:sourcecode.File, line:sourcecode.Line):RequestM[T] = {
+    val r = new RequestM[T](enclosing, "failed", file, line)
     r.resolve(Failure(ex))
     r
   }
@@ -226,8 +253,8 @@ object RequestM {
    * inside the Actor's receive loop. (Or inside persist() in a PersistentActor, or some such.)
    * Do this only when necessary; normally, you should work through .request().
    */
-  def prep[T]():RequestM[T] = {
-    new RequestM[T]
+  def prep[T]()(implicit enclosing:sourcecode.FullName, file:sourcecode.File, line:sourcecode.Line):RequestM[T] = {
+    new RequestM[T](enclosing, "prep", file, line)
   }
 }
 
@@ -285,8 +312,8 @@ trait RequesterImplicits {
      * This works pretty much exactly like request, but expects that the response will be of type T. It will
      * throw a ClassCastException if anything else is received. Otherwise, it is identical to request().
      */
-    def requestFor[T](msg:Any, retriesInit:Int = 0)(implicit tag: ClassTag[T]):RequestM[T] = {
-      val req = new RequestM[T]
+    def requestFor[T](msg:Any, retriesInit:Int = 0)(implicit tag: ClassTag[T], enclosing:sourcecode.FullName, file:sourcecode.File, line:sourcecode.Line):RequestM[T] = {
+      val req = new RequestM[T](enclosing, "requestFor", file, line)
       requester.doRequest[T](target, msg, req)
       var retries = retriesInit
       req.intercept {
@@ -328,8 +355,8 @@ trait RequesterImplicits {
       requestFor[Any](msg)
     }
     
-    def requestFor[T](msg:Any)(implicit tag: ClassTag[T]):RequestM[T] = {
-      val req = new RequestM[T]
+    def requestFor[T](msg:Any)(implicit tag: ClassTag[T], enclosing:sourcecode.FullName, file:sourcecode.File, line:sourcecode.Line):RequestM[T] = {
+      val req = new RequestM[T](enclosing, "requestFor", file, line)
       requester.doRequestGuts[T](target.ask(msg)(requester.requestTimeout), req)
       req
     }
@@ -347,8 +374,8 @@ trait RequesterImplicits {
    * at the top), it will quietly turn the Future into a Request. If Request isn't already expected, though, you'll have
    * to specify loopback explicitly.
    */
-  implicit def loopback[T](f:Future[T])(implicit tag:ClassTag[T]):RequestM[T] = {
-    val req = new RequestM[T]
+  implicit def loopback[T](f:Future[T])(implicit tag:ClassTag[T], enclosing:sourcecode.FullName, file:sourcecode.File, line:sourcecode.Line):RequestM[T] = {
+    val req = new RequestM[T](enclosing, "loopback", file, line)
     requester.doRequestGuts[T](f, req)
     req
   }

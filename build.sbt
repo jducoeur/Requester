@@ -6,7 +6,7 @@ name := "Requester library for Akka"
 
 normalizedName := "requester"
 
-version := "2.4"
+version := "2.5"
 
 organization := "org.querki"
 
@@ -17,7 +17,8 @@ crossScalaVersions := Seq("2.10.5", "2.11.8")
 libraryDependencies ++= Seq(
   "com.typesafe.akka" %% "akka-actor" % akkaV,
   "com.typesafe.akka" %% "akka-testkit" % akkaV,
-  "org.scalatest" %% "scalatest" % "2.2.6" % "test"
+  "org.scalatest" %% "scalatest" % "2.2.6" % "test",
+  "com.lihaoyi" %% "sourcecode" % "0.1.3"
 )
   
 homepage := Some(url("http://www.querki.net/"))
