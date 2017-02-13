@@ -187,6 +187,12 @@ Note that `resolve` takes a `Try[T]` -- you can use it to resolve either `Succes
 
 `resolve` is the heart of Requester, and is used internally to complete requests -- the conventional Requester workflow is to send an `ask`, loop the response back into the requester's `receive` function, and pass that response into `resolve`. Similarly, `RequestM.successful()` and `.failure()` simply create a `RequestM` and immediately call `resolve` on it. Thus, you can use `resolve` to build other, high-level constructs on top of `RequestM`.
 
+### Exceptions and Stack Traces
+
+As of 2.5, Requester incorporates ideas inspired by [this blog post](http://www.schibsted.pl/blog/tracing-back-scala-future-chains/), to do a quick-and-dirty recording of the call sites. It's by no means comprehensive, but it's cheap enough to be reasonable to do automatically.
+
+If the Request throws an exception, this information is then appended to the end of the call stack -- essentially, you can see the RequestM traces all the way up to the top. It's not nearly as complete as a true JVM stack trace, but it can make it a bit easier to track down what the heck is going on when you get an Exception six Request levels down. This is especially valuable when you are composing complex constructions using RequestM.
+
 ### Caveats
 
 Because of the loopback, request necessarily increases the latency of processing a request. This increase is typically slight (since it sends a message locally to the same Actor), but in a heavily-loaded Actor it could become non-trivial.
@@ -211,6 +217,8 @@ More unit tests are needed, especially around failure management.
 
 ### Change log
 
+* **2.5** -- Added the pseudo-stack-trace support described above under "Exceptions and Stack Traces". This adds a dependency to @lihaoyi's sourcecode library, but that should be cheap enough to not matter too much.
+
 * **2.4** -- Added support for `prep()` and `resolve()`. `resolve` has always been there -- it's central to the system -- but had previously been private. It is now opened up, to allow `Promise`-like code.
 
 * **2.1** -- If a Request is being auto-converted to a Future, Exceptions now propagate from the Request to the Future. request() and requestFor() now work with ActorSelection as well as ActorRef. Fixed the unwinding of nested flatMaps to work tail-recursively. (Previously, if you nested a *lot* of flatMaps together, they could throw a StackOverflow while unwinding at the end.)
@@ -219,7 +227,7 @@ More unit tests are needed, especially around failure management.
 
 ### License
 
-Copyright (c) 2015 Querki Inc. (justin at querki dot net)
+Copyright (c) 2017 Querki Inc. (justin at querki dot net)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 
