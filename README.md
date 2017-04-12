@@ -22,7 +22,7 @@ and have it work just as you expect.
 
 To use Requester, add this to your libraryDependencies in sbt:
 ```
-"org.querki" %% "requester" % "2.5"
+"org.querki" %% "requester" % "2.6"
 ```
 
 ### Using Requester
@@ -216,6 +216,8 @@ I am pretty sure that withFilter() doesn't do the right thing yet. It needs to b
 More unit tests are needed, especially around failure management.
 
 ### Change log
+
+* **2.6** -- Added `recover()` and `recoverWith()` to RequestM. These work as you would expect them to from Future.
 
 * **2.5** -- Added the pseudo-stack-trace support described above under "Exceptions and Stack Traces". This adds a dependency to @lihaoyi's sourcecode library, but that should be cheap enough to not matter too much.
 
