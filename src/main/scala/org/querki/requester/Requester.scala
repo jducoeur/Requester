@@ -227,6 +227,44 @@ class RequestM[T](val enclosing:sourcecode.FullName, val method:sourcecode.Name,
   }
   
   def withFilter(p:T => Boolean):RequestM[T] = filter(p)
+  
+  def recover[U >: T](pf: PartialFunction[Throwable, U]): RequestM[U] = {
+    val child:RequestM[U] = new RequestM(enclosing, "recover", file, line)
+    onComplete {
+      case Success(v) => {
+        try {
+          child.resolve(Success(v))
+        } catch {
+          case th:Throwable => child.resolve(Success(pf(th)))
+        }        
+      }
+      case Failure(ex) => child.resolve(Success(pf(ex)))
+    }
+    child
+  }
+  
+  def recoverWith[U >: T](pf: PartialFunction[Throwable, RequestM[U]]): RequestM[U] = {
+    val child:RequestM[U] = new RequestM(enclosing, "recoverWith", file, line)
+    onComplete {
+      case Success(v) => {
+        try {
+          child.resolve(Success(v))
+        } catch {
+          case th:Throwable => {
+            pf(th) onComplete {
+              case any => child.resolve(any)
+            }
+          }
+        }        
+      }
+      case Failure(th) => {
+        pf(th) onComplete {
+          case any => child.resolve(any)
+        }
+      }
+    }
+    child    
+  }
 }
 
 object RequestM {

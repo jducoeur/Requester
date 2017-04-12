@@ -8,6 +8,8 @@ import akka.actor._
  * @author jducoeur
  */
 
+case class BoomException(msg:String) extends Exception(msg)
+
 object ComprehensionTests {
   case object Start
   case class Response(msg:String)
@@ -77,12 +79,58 @@ object ComprehensionTests {
           four <- doubler.requestFor[Int](2)
           eight <- doubler.requestFor[Int](four)
           sixteen <- doubler.requestFor[Int](eight)
-          dummy = if (errorP) throw new Exception("BOOM")
+          dummy = if (errorP) throw new BoomException("BOOM")
         }
           yield sixteen
           
         rm onComplete {
           case Success(sixteen) => sender ! sixteen
+          case Failure(ex) => sender ! ex
+        }
+      }
+    }    
+  }
+  
+  class RecoverExponent extends QTestActor {
+    def doReceive = {
+      case Start => {
+        val rm = for {
+          four <- doubler.requestFor[Int](2)
+          eight <- doubler.requestFor[Int](four)
+          boom <- RequestM.failed[Int](new BoomException("Boom"))
+          sixteen <- doubler.requestFor[Int](eight)
+        }
+          yield sixteen
+          
+        val recovered = rm recover {
+          case BoomException(msg) => -1
+        }
+          
+        recovered onComplete {
+          case Success(negOne) => sender ! negOne
+          case Failure(ex) => sender ! ex
+        }
+      }
+    }    
+  }
+  
+  class RecoverWithExponent extends QTestActor {
+    def doReceive = {
+      case Start => {
+        val rm = for {
+          four <- doubler.requestFor[Int](2)
+          eight <- doubler.requestFor[Int](four)
+          boom <- RequestM.failed[Int](new BoomException("Boom"))
+          sixteen <- doubler.requestFor[Int](eight)
+        }
+          yield sixteen
+          
+        val recovered = rm recoverWith {
+          case BoomException(msg) => RequestM.successful(-1)
+        }
+          
+        recovered onComplete {
+          case Success(negOne) => sender ! negOne
           case Failure(ex) => sender ! ex
         }
       }
@@ -142,7 +190,7 @@ class ComprehensionTests extends RequesterTests {
     "be able to use onComplete for failure" in {
       val exp = system.actorOf(Props(classOf[CompleteExponent]))
       exp ! StartWith(true)
-      val ex = expectMsgClass(dur, classOf[Exception])
+      val ex = expectMsgClass(dur, classOf[BoomException])
       assert(ex.getMessage == "BOOM")
     }
     
@@ -150,6 +198,18 @@ class ComprehensionTests extends RequesterTests {
       val exp = system.actorOf(Props(classOf[Exponent]))
       exp ! Terms(2,4)
       expectMsg(16)
+    }
+    
+    "be able to use recover for failure" in {
+      val exp = system.actorOf(Props(classOf[RecoverExponent]))
+      exp ! Start
+      expectMsg(-1)
+    }
+    
+    "be able to use recoverWith for failure" in {
+      val exp = system.actorOf(Props(classOf[RecoverWithExponent]))
+      exp ! Start
+      expectMsg(-1)
     }
   }
 }
