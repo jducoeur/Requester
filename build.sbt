@@ -1,24 +1,25 @@
 lazy val root = project.in(file("."))
 
-lazy val akkaV = "2.4.6"
+lazy val akkaV = "2.5.3"
 
 name := "Requester library for Akka"
 
 normalizedName := "requester"
 
-version := "2.6"
+version := "2.7-SNAPSHOT"
+isSnapshot := true
 
 organization := "org.querki"
 
-scalaVersion := "2.11.8"
+scalaVersion := "2.11.11"
 
-crossScalaVersions := Seq("2.10.5", "2.11.8")
+crossScalaVersions := Seq("2.11.11", "2.12.3")
 
 libraryDependencies ++= Seq(
   "com.typesafe.akka" %% "akka-actor" % akkaV,
   "com.typesafe.akka" %% "akka-testkit" % akkaV,
-  "org.scalatest" %% "scalatest" % "2.2.6" % "test",
-  "com.lihaoyi" %% "sourcecode" % "0.1.3"
+  "org.scalatest" %% "scalatest" % "3.0.3" % "test",
+  "com.lihaoyi" %% "sourcecode" % "0.1.4"
 )
   
 homepage := Some(url("http://www.querki.net/"))
