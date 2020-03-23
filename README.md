@@ -22,8 +22,14 @@ and have it work just as you expect.
 
 To use Requester, add this to your libraryDependencies in sbt:
 ```
-"org.querki" %% "requester" % "2.6"
+"org.querki" %% "requester" % "2.7"
 ```
+
+This is for Akka 2.5. If you are still on Akka 2.4, use Requester release 2.6 instead.
+
+(We don't have a 2.6 branch yet; we'll get there eventually. But Requester
+as currently designed is aimed at Classic Akka, not Akka Typed, so I expect
+this library to have a limited lifespan at this point.)
 
 ### Using Requester
 
@@ -216,6 +222,8 @@ I am pretty sure that withFilter() doesn't do the right thing yet. It needs to b
 More unit tests are needed, especially around failure management.
 
 ### Change log
+
+* **2.7** -- Upgraded to Akka 2.5. Added Scala 2.12 and 2.13 support; dropped 2.10 support.
 
 * **2.6** -- Added `recover()` and `recoverWith()` to RequestM. These work as you would expect them to from Future.
 

@@ -21,7 +21,7 @@ class RequesterTests extends TestKit(ActorSystem("RequesterTests"))
     TestKit.shutdownActorSystem(system)
   }
   
-  implicit val dur = 1 second
+  implicit val dur = 1.second
 }
 
 class Doubler extends Actor {

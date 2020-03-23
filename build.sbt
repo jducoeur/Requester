@@ -1,53 +1,26 @@
 lazy val root = project.in(file("."))
 
-lazy val akkaV = "2.4.6"
+lazy val akkaV = "2.5.27"
 
 name := "Requester library for Akka"
 
 normalizedName := "requester"
 
-version := "2.6"
+version := "2.7"
 
 organization := "org.querki"
 
-scalaVersion := "2.11.8"
+scalaVersion := "2.13.1"
 
-crossScalaVersions := Seq("2.10.5", "2.11.8")
+crossScalaVersions := Seq("2.11.8", "2.12.8", "2.13.1")
 
 libraryDependencies ++= Seq(
   "com.typesafe.akka" %% "akka-actor" % akkaV,
   "com.typesafe.akka" %% "akka-testkit" % akkaV,
-  "org.scalatest" %% "scalatest" % "2.2.6" % "test",
-  "com.lihaoyi" %% "sourcecode" % "0.1.3"
-)
-  
-homepage := Some(url("http://www.querki.net/"))
-
-licenses += ("MIT License", url("http://www.opensource.org/licenses/mit-license.php"))
-
-scmInfo := Some(ScmInfo(
-    url("https://github.com/jducoeur/Requester"),
-    "scm:git:git@github.com/jducoeur/Requester.git",
-    Some("scm:git:git@github.com/jducoeur/Requester.git")))
-
-publishMavenStyle := true
-
-publishTo := {
-  val nexus = "https://oss.sonatype.org/"
-  if (isSnapshot.value)
-    Some("snapshots" at nexus + "content/repositories/snapshots")
-  else
-    Some("releases" at nexus + "service/local/staging/deploy/maven2")
-}
-
-pomExtra := (
-  <developers>
-    <developer>
-      <id>jducoeur</id>
-      <name>Mark Waks</name>
-      <url>https://github.com/jducoeur/</url>
-    </developer>
-  </developers>
+  "org.scalatest" %% "scalatest" % "3.1.1" % "test",
+  "com.lihaoyi" %% "sourcecode" % "0.1.9"
 )
 
-pomIncludeRepository := { _ => false }
+publishTo := sonatypePublishToBundle.value
+
+usePgpKeyHex("A5A4DA66BF0A391F46AEF0EAC74603EB63699C41")
